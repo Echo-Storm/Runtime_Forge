@@ -1,0 +1,557 @@
+"""
+Main window for AIO Runtime Installer.
+Steel/blue dark theme.
+"""
+
+import ctypes
+from typing import Optional
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QCheckBox,
+    QProgressBar, QMessageBox, QHeaderView, QFrame, QStatusBar,
+    QTextEdit, QSizePolicy, QAbstractItemView,
+)
+from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QColor
+
+from core.definitions import Component, InstalledState, build_components
+from core.logger import setup_logging
+from core.paths import get_app_dir
+from core.version_resolvers import LatestInfo
+from ui.workers import InstallWorker, ResultStatus, ScanWorker
+
+STYLE_SHEET = """
+QMainWindow, QWidget {
+    background-color: #1a1d21;
+    color: #c0c4c9;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 10pt;
+}
+
+QLabel#titleLabel {
+    color: #5b9bd5;
+    font-size: 11pt;
+    font-weight: bold;
+}
+
+QLabel#warnLabel {
+    color: #d5a05b;
+    font-weight: bold;
+    padding: 4px 10px;
+    background-color: #2a241a;
+    border: 1px solid #6a5a30;
+    border-radius: 3px;
+}
+
+QPushButton {
+    background-color: #262b31;
+    border: 1px solid #3d444c;
+    border-radius: 3px;
+    padding: 6px 14px;
+    color: #c0c4c9;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    background-color: #323942;
+    border-color: #5b9bd5;
+}
+
+QPushButton:pressed {
+    background-color: #3d444c;
+}
+
+QPushButton:disabled {
+    background-color: #202327;
+    color: #5a5f66;
+    border-color: #2c3036;
+}
+
+QPushButton#installBtn {
+    background-color: #1e3a5a;
+    border-color: #5b9bd5;
+    color: #7cb8f0;
+    font-weight: bold;
+    padding: 8px 20px;
+}
+
+QPushButton#installBtn:hover {
+    background-color: #2a4a70;
+}
+
+QPushButton#installBtn:disabled {
+    background-color: #202327;
+    border-color: #303540;
+    color: #505050;
+}
+
+QPushButton#cancelBtn {
+    background-color: #4a2020;
+    border-color: #a04040;
+    color: #d08080;
+}
+
+QPushButton#cancelBtn:hover {
+    background-color: #5a2828;
+}
+
+QTreeWidget {
+    background-color: #1e2226;
+    alternate-background-color: #22262b;
+    border: 1px solid #333941;
+    color: #c0c4c9;
+    selection-background-color: #2a4a70;
+}
+
+QTreeWidget::item {
+    padding: 3px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #2a4a70;
+}
+
+QHeaderView::section {
+    background-color: #262b31;
+    color: #5b9bd5;
+    padding: 6px;
+    border: none;
+    border-bottom: 2px solid #5b9bd5;
+    font-weight: bold;
+}
+
+QProgressBar {
+    background-color: #202327;
+    border: 1px solid #333941;
+    border-radius: 3px;
+    height: 18px;
+    text-align: center;
+    color: #c0c4c9;
+}
+
+QProgressBar::chunk {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2a5a8a, stop:1 #5b9bd5);
+    border-radius: 2px;
+}
+
+QTextEdit {
+    background-color: #16181b;
+    border: 1px solid #2a2e33;
+    color: #8a8f96;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+}
+
+QCheckBox {
+    color: #a0a4a9;
+    spacing: 6px;
+}
+
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #4a4a4a;
+    border-radius: 2px;
+    background-color: #202327;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #5b9bd5;
+    border-color: #5b9bd5;
+}
+
+QStatusBar {
+    background-color: #1a1d21;
+    border-top: 1px solid #2a2e33;
+    color: #5b9bd5;
+}
+
+QScrollBar:vertical {
+    background-color: #1a1d21;
+    width: 12px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #333941;
+    border-radius: 4px;
+    min-height: 30px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #454c56;
+}
+"""
+
+STATUS_NOT_INSTALLED = "Not installed"
+COLOR_NOT_INSTALLED = "#8a8f96"
+COLOR_INSTALLED = "#6bbf6b"
+COLOR_UPDATE_AVAILABLE = "#d5c05b"
+COLOR_INSTALLING = "#5b9bd5"
+COLOR_FAILED = "#d56b6b"
+COLOR_SKIPPED = "#8a8f96"
+
+
+def _is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except OSError:
+        return False
+
+
+class MainWindow(QMainWindow):
+    APP_NAME = "AIO Runtime Installer"
+    APP_VERSION = "1.0.0"
+
+    def __init__(self):
+        super().__init__()
+
+        self.app_dir = get_app_dir()
+        self.logger = setup_logging(self.app_dir)
+        self.logger.status(f"{self.APP_NAME} v{self.APP_VERSION} starting")
+
+        self.components = build_components()
+        self.component_by_key = {c.key: c for c in self.components}
+        self.tree_items: dict[str, QTreeWidgetItem] = {}
+
+        self.scan_worker: Optional[ScanWorker] = None
+        self.install_worker: Optional[InstallWorker] = None
+
+        settings_path = str(self.app_dir / "AIORuntimeInstaller.ini")
+        self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
+
+        self.setStyleSheet(STYLE_SHEET)
+        self._setup_ui()
+        self._load_settings()
+        self._populate_tree()
+        self._start_scan()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _setup_ui(self):
+        self.setWindowTitle(f"{self.APP_NAME} v{self.APP_VERSION}")
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title = QLabel("AIO RUNTIME INSTALLER")
+        title.setObjectName("titleLabel")
+        layout.addWidget(title)
+
+        if not _is_admin():
+            warn = QLabel(
+                "Not running as administrator — most installs will fail. "
+                "Re-launch this app elevated (right-click → Run as administrator)."
+            )
+            warn.setObjectName("warnLabel")
+            warn.setWordWrap(True)
+            layout.addWidget(warn)
+
+        # --- Toolbar ---
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.clicked.connect(self._on_select_all)
+        toolbar.addWidget(self.select_all_btn)
+
+        self.select_none_btn = QPushButton("Select None")
+        self.select_none_btn.clicked.connect(self._on_select_none)
+        toolbar.addWidget(self.select_none_btn)
+
+        self.select_missing_btn = QPushButton("Select Not-Installed")
+        self.select_missing_btn.clicked.connect(self._on_select_not_installed)
+        toolbar.addWidget(self.select_missing_btn)
+
+        self.rescan_btn = QPushButton("Rescan")
+        self.rescan_btn.clicked.connect(self._start_scan)
+        toolbar.addWidget(self.rescan_btn)
+
+        toolbar.addStretch()
+
+        self.dry_run_checkbox = QCheckBox("Dry Run")
+        self.dry_run_checkbox.setToolTip("Preview every action (including what it would download) without installing or writing anything")
+        toolbar.addWidget(self.dry_run_checkbox)
+
+        layout.addLayout(toolbar)
+
+        # --- Tree ---
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(["Component", "Status", "Installed Version", "Latest Version"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        layout.addWidget(self.tree, stretch=3)
+
+        # --- Log pane ---
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setFixedHeight(140)
+        self.log_view.setPlaceholderText("Log output...")
+        layout.addWidget(self.log_view, stretch=1)
+
+        # --- Bottom bar ---
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setSpacing(12)
+
+        self.summary_label = QLabel("Scanning...")
+        bottom_bar.addWidget(self.summary_label)
+
+        bottom_bar.addStretch()
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedWidth(220)
+        self.progress_bar.setVisible(False)
+        bottom_bar.addWidget(self.progress_bar)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self.cancel_btn.setVisible(False)
+        bottom_bar.addWidget(self.cancel_btn)
+
+        self.install_btn = QPushButton("Install Selected")
+        self.install_btn.setObjectName("installBtn")
+        self.install_btn.clicked.connect(self._on_install_clicked)
+        self.install_btn.setEnabled(False)
+        bottom_bar.addWidget(self.install_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background-color: #333941; max-height: 1px;")
+        layout.addWidget(sep)
+        layout.addLayout(bottom_bar)
+
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        self.resize(980, 720)
+
+    def _populate_tree(self):
+        categories: dict[str, QTreeWidgetItem] = {}
+        for component in self.components:
+            cat_item = categories.get(component.category)
+            if cat_item is None:
+                cat_item = QTreeWidgetItem(self.tree, [component.category, "", "", ""])
+                cat_item.setFlags(cat_item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
+                cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                font = cat_item.font(0)
+                font.setBold(True)
+                cat_item.setFont(0, font)
+                categories[component.category] = cat_item
+
+            leaf = QTreeWidgetItem(cat_item, [component.name, "Checking...", "", ""])
+            leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            leaf.setCheckState(0, Qt.CheckState.Unchecked)
+            leaf.setData(0, Qt.ItemDataRole.UserRole, component.key)
+            leaf.setForeground(1, self._color(COLOR_NOT_INSTALLED))
+            self.tree_items[component.key] = leaf
+
+        self.tree.expandAll()
+
+    def _color(self, hex_str: str):
+        return QColor(hex_str)
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    def _load_settings(self):
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        dry_run = self.settings.value("dry_run", False, type=bool)
+        self.dry_run_checkbox.setChecked(dry_run)
+
+    def _save_settings(self):
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("dry_run", self.dry_run_checkbox.isChecked())
+
+    def closeEvent(self, event):
+        self._save_settings()
+        if self.install_worker and self.install_worker.isRunning():
+            reply = QMessageBox.question(
+                self, "Install in Progress", "An install is running. Quit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            self.install_worker.request_cancel()
+            self.install_worker.wait(5000)
+        event.accept()
+
+    # ------------------------------------------------------------------
+    # Scanning
+    # ------------------------------------------------------------------
+
+    def _start_scan(self):
+        self.rescan_btn.setEnabled(False)
+        self.install_btn.setEnabled(False)
+        self.summary_label.setText("Scanning installed components...")
+        for key, item in self.tree_items.items():
+            item.setText(1, "Checking...")
+            item.setForeground(1, self._color(COLOR_NOT_INSTALLED))
+
+        self.scan_worker = ScanWorker(self.components, self)
+        self.scan_worker.component_scanned.connect(self._on_component_scanned)
+        self.scan_worker.finished_scan.connect(self._on_scan_finished)
+        self.scan_worker.start()
+
+    def _on_component_scanned(self, key: str, state: InstalledState, latest: Optional[LatestInfo]):
+        item = self.tree_items.get(key)
+        if item is None:
+            return
+
+        if state.installed:
+            item.setText(1, state.version and f"Installed (v{state.version})" or "Installed")
+            item.setForeground(1, self._color(COLOR_INSTALLED))
+        else:
+            item.setText(1, STATUS_NOT_INSTALLED)
+            item.setForeground(1, self._color(COLOR_NOT_INSTALLED))
+
+        item.setText(2, state.version or "-")
+        if latest is not None:
+            item.setText(3, latest.version)
+            if state.installed and state.version and state.version != latest.version:
+                item.setForeground(1, self._color(COLOR_UPDATE_AVAILABLE))
+                item.setText(1, f"Installed (v{state.version}) → v{latest.version} available")
+        else:
+            item.setText(3, "-")
+
+        # Pre-select components that aren't installed yet — mirrors the PS1
+        # installing everything by default, but lets the user deselect.
+        if not state.installed:
+            item.setCheckState(0, Qt.CheckState.Checked)
+
+    def _on_scan_finished(self):
+        self.rescan_btn.setEnabled(True)
+        self.install_btn.setEnabled(True)
+        not_installed = sum(1 for c in self.components if not c.is_installed().installed)
+        self.summary_label.setText(f"Scan complete — {not_installed} of {len(self.components)} not installed")
+        self.logger.status("Scan complete")
+
+    # ------------------------------------------------------------------
+    # Selection helpers
+    # ------------------------------------------------------------------
+
+    def _set_all_checkstate(self, state: Qt.CheckState):
+        for item in self.tree_items.values():
+            item.setCheckState(0, state)
+
+    def _on_select_all(self):
+        self._set_all_checkstate(Qt.CheckState.Checked)
+
+    def _on_select_none(self):
+        self._set_all_checkstate(Qt.CheckState.Unchecked)
+
+    def _on_select_not_installed(self):
+        for key, item in self.tree_items.items():
+            component = self.component_by_key[key]
+            try:
+                installed = component.is_installed().installed
+            except Exception:
+                installed = False
+            item.setCheckState(0, Qt.CheckState.Unchecked if installed else Qt.CheckState.Checked)
+
+    def _selected_keys(self) -> set[str]:
+        return {key for key, item in self.tree_items.items() if item.checkState(0) == Qt.CheckState.Checked}
+
+    # ------------------------------------------------------------------
+    # Install
+    # ------------------------------------------------------------------
+
+    def _on_install_clicked(self):
+        selected = self._selected_keys()
+        if not selected:
+            QMessageBox.information(self, "Nothing Selected", "Check at least one component to install.")
+            return
+
+        dry_run = self.dry_run_checkbox.isChecked()
+        if not dry_run:
+            reply = QMessageBox.question(
+                self, "Confirm Install",
+                f"Install {len(selected)} selected component(s)? This will download and run installers, "
+                "and may modify the registry, PATH, and System32.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self.install_btn.setEnabled(False)
+        self.rescan_btn.setEnabled(False)
+        self.cancel_btn.setVisible(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.log_view.clear()
+
+        self.install_worker = InstallWorker(self.components, selected, dry_run, self)
+        self.install_worker.component_started.connect(self._on_component_started)
+        self.install_worker.component_progress.connect(self._on_component_progress)
+        self.install_worker.component_finished.connect(self._on_component_finished)
+        self.install_worker.log_line.connect(self._on_log_line)
+        self.install_worker.all_finished.connect(self._on_all_finished)
+        self.install_worker.start()
+
+    def _on_cancel_clicked(self):
+        if self.install_worker:
+            self.install_worker.request_cancel()
+            self.status_bar.showMessage("Cancelling after current component finishes...")
+
+    def _on_component_started(self, key: str):
+        item = self.tree_items.get(key)
+        if item:
+            item.setText(1, "Installing...")
+            item.setForeground(1, self._color(COLOR_INSTALLING))
+        component = self.component_by_key.get(key)
+        if component:
+            self.status_bar.showMessage(f"Installing {component.name}...")
+
+    def _on_component_progress(self, key: str, message: str, fraction: float):
+        self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
+        self.status_bar.showMessage(message)
+
+    def _on_component_finished(self, key: str, status: ResultStatus):
+        item = self.tree_items.get(key)
+        if item is None:
+            return
+        if status == ResultStatus.INSTALLED:
+            item.setText(1, "Installed")
+            item.setForeground(1, self._color(COLOR_INSTALLED))
+        elif status == ResultStatus.SKIPPED:
+            item.setText(1, "Skipped (already installed)")
+            item.setForeground(1, self._color(COLOR_SKIPPED))
+        else:
+            item.setText(1, "Failed")
+            item.setForeground(1, self._color(COLOR_FAILED))
+
+    def _on_log_line(self, line: str):
+        self.log_view.append(line)
+
+    def _on_all_finished(self, installed: int, skipped: int, failed: int):
+        self.install_worker = None
+        self.install_btn.setEnabled(True)
+        self.rescan_btn.setEnabled(True)
+        self.cancel_btn.setVisible(False)
+        self.progress_bar.setVisible(False)
+        self.status_bar.clearMessage()
+        self.summary_label.setText(f"Done — Installed: {installed}  Skipped: {skipped}  Failed: {failed}")
+
+        QMessageBox.information(
+            self, "Install Complete",
+            f"Installed: {installed}\nSkipped (already present): {skipped}\nFailed: {failed}\n\n"
+            f"Log saved to: {self.logger.log_file}",
+        )

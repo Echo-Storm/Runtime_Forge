@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.log
+AIORuntimeInstaller_Log_*.txt
+AIORuntimeInstaller.ini
+build/
+dist/
+temp_installers/
