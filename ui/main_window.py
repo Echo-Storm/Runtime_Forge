@@ -22,7 +22,7 @@ from core import profiles
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_app_dir
-from core.version_resolvers import LatestInfo
+from core.version_resolvers import LatestInfo, version_is_newer
 from ui.workers import InstallWorker, ResultStatus, ScanWorker
 
 STYLE_SHEET = """
@@ -227,6 +227,15 @@ class MainWindow(QMainWindow):
         self._profiles_cache: List[profiles.Profile] = []
         self._applying_profile = False
         self._active_profile_name: Optional[str] = None
+        self._scan_results: dict[str, tuple] = {}
+        # Auto-select-missing/outdated is a sensible default only when
+        # nothing has been chosen yet. After the first scan, later Rescans
+        # must never touch checkbox state on their own — a user who
+        # deliberately unchecked something, then clicked Rescan (a normal,
+        # expected action) would otherwise find it silently re-checked with
+        # no warning. "Select Missing/Outdated" stays available to reapply
+        # this deliberately.
+        self._initial_scan_done = False
 
         settings_path = str(self.app_dir / "AIORuntimeInstaller.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
@@ -276,7 +285,8 @@ class MainWindow(QMainWindow):
         self.select_none_btn.clicked.connect(self._on_select_none)
         toolbar.addWidget(self.select_none_btn)
 
-        self.select_missing_btn = QPushButton("Select Not-Installed")
+        self.select_missing_btn = QPushButton("Select Missing/Outdated")
+        self.select_missing_btn.setToolTip("Check everything not installed, plus anything with an update available")
         self.select_missing_btn.clicked.connect(self._on_select_not_installed)
         toolbar.addWidget(self.select_missing_btn)
 
@@ -452,6 +462,7 @@ class MainWindow(QMainWindow):
         self.rescan_btn.setEnabled(False)
         self.install_btn.setEnabled(False)
         self.summary_label.setText("Scanning installed components...")
+        self._scan_results.clear()
         for key, item in self.tree_items.items():
             item.setText(1, "Checking...")
             item.setForeground(1, self._color(COLOR_NOT_INSTALLED))
@@ -461,38 +472,51 @@ class MainWindow(QMainWindow):
         self.scan_worker.finished_scan.connect(self._on_scan_finished)
         self.scan_worker.start()
 
+    @staticmethod
+    def _has_update(state: InstalledState, latest: Optional[LatestInfo]) -> bool:
+        return bool(state.installed and latest is not None and version_is_newer(latest.version, state.version or ""))
+
     def _on_component_scanned(self, key: str, state: InstalledState, latest: Optional[LatestInfo]):
         item = self.tree_items.get(key)
         if item is None:
             return
+        self._scan_results[key] = (state, latest)
+
+        has_update = self._has_update(state, latest)
 
         if state.installed:
-            item.setText(1, state.version and f"Installed (v{state.version})" or "Installed")
-            item.setForeground(1, self._color(COLOR_INSTALLED))
+            if has_update:
+                item.setText(1, f"Installed (v{state.version}) → v{latest.version} available")
+                item.setForeground(1, self._color(COLOR_UPDATE_AVAILABLE))
+            else:
+                item.setText(1, state.version and f"Installed (v{state.version})" or "Installed")
+                item.setForeground(1, self._color(COLOR_INSTALLED))
         else:
             item.setText(1, STATUS_NOT_INSTALLED)
             item.setForeground(1, self._color(COLOR_NOT_INSTALLED))
 
         item.setText(2, state.version or "-")
-        if latest is not None:
-            item.setText(3, latest.version)
-            if state.installed and state.version and state.version != latest.version:
-                item.setForeground(1, self._color(COLOR_UPDATE_AVAILABLE))
-                item.setText(1, f"Installed (v{state.version}) → v{latest.version} available")
-        else:
-            item.setText(3, "-")
+        item.setText(3, latest.version if latest is not None else "-")
 
-        # Pre-select components that aren't installed yet — mirrors the PS1
-        # installing everything by default, but lets the user deselect.
-        if not state.installed:
+        # Pre-select anything that's missing entirely, or that has a real
+        # update available — the whole point of surfacing "update available"
+        # is for Install Selected to actually be able to act on it. Only on
+        # the very first scan, though — see _initial_scan_done.
+        if not self._initial_scan_done and (not state.installed or has_update):
             item.setCheckState(0, Qt.CheckState.Checked)
 
     def _on_scan_finished(self):
+        self._initial_scan_done = True
         self.rescan_btn.setEnabled(True)
         self.install_btn.setEnabled(True)
-        not_installed = sum(1 for c in self.components if not c.is_installed().installed)
-        self.summary_label.setText(f"Scan complete — {not_installed} of {len(self.components)} not installed")
-        self.logger.status("Scan complete")
+        not_installed = sum(1 for state, _ in self._scan_results.values() if not state.installed)
+        updates_available = sum(1 for state, latest in self._scan_results.values() if self._has_update(state, latest))
+
+        msg = f"Scan complete — {not_installed} of {len(self.components)} not installed"
+        if updates_available:
+            msg += f", {updates_available} update(s) available"
+        self.summary_label.setText(msg)
+        self.logger.status(f"Scan complete ({not_installed} not installed, {updates_available} updates available)")
 
     # ------------------------------------------------------------------
     # Selection helpers
@@ -509,13 +533,15 @@ class MainWindow(QMainWindow):
         self._set_all_checkstate(Qt.CheckState.Unchecked)
 
     def _on_select_not_installed(self):
+        # Reads the cached scan results rather than calling is_installed()
+        # again here — several of those checks (git/node/cmake/pwsh) shell
+        # out to the real exe with a 15s timeout each, which would freeze
+        # the UI thread if run synchronously from a button click instead of
+        # ScanWorker's background thread.
         for key, item in self.tree_items.items():
-            component = self.component_by_key[key]
-            try:
-                installed = component.is_installed().installed
-            except Exception:
-                installed = False
-            item.setCheckState(0, Qt.CheckState.Unchecked if installed else Qt.CheckState.Checked)
+            state, latest = self._scan_results.get(key, (InstalledState(installed=False), None))
+            needs_action = not state.installed or self._has_update(state, latest)
+            item.setCheckState(0, Qt.CheckState.Checked if needs_action else Qt.CheckState.Unchecked)
 
     def _selected_keys(self) -> set[str]:
         return {key for key, item in self.tree_items.items() if item.checkState(0) == Qt.CheckState.Checked}
@@ -609,7 +635,9 @@ class MainWindow(QMainWindow):
     def _write_profile(self, name: str):
         selected = sorted(self._selected_keys())
         profile = profiles.Profile(name=name, component_keys=selected, created=datetime.now().isoformat(timespec="seconds"))
-        profiles.save_profile(self.app_dir, profile)
+        if profiles.save_profile(self.app_dir, profile) is None:
+            QMessageBox.warning(self, "Save Failed", f"Could not save profile '{name}' — check the name and try again.")
+            return
         self._active_profile_name = name
         self._refresh_profile_combo(select_name=name)
         self.status_bar.showMessage(f"Saved profile '{name}' ({len(selected)} component(s))", 5000)

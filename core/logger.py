@@ -23,6 +23,17 @@ class Logger:
     def add_listener(self, fn: Callable[[str], None]) -> None:
         self._listeners.append(fn)
 
+    def remove_listener(self, fn: Callable[[str], None]) -> None:
+        # Callers (InstallWorker, one per run) must unsubscribe when done —
+        # this is a long-lived singleton, so a listener added and never
+        # removed keeps firing (and keeps the dead worker object reachable)
+        # for the rest of the process, one extra duplicate log line per
+        # leaked listener on every subsequent run.
+        try:
+            self._listeners.remove(fn)
+        except ValueError:
+            pass
+
     def _emit(self, line: str) -> None:
         print(line)
         try:

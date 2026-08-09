@@ -41,8 +41,17 @@ def download(
         return dest_path
 
     if dest_path.is_file():
-        log.status(f"Cached: {filename}")
-        return dest_path
+        # A prior run killed mid-download (crash, power loss, a hard kill —
+        # temp_installers/ is only cleaned up at the end of a *completed*
+        # InstallWorker run, so a truncated file can genuinely survive to
+        # the next launch) would otherwise be trusted as-is here, with none
+        # of the size-sanity check the fresh-download path below enforces —
+        # handing a corrupt installer straight to run_exe/run_msi.
+        if dest_path.stat().st_size >= MIN_PLAUSIBLE_BYTES:
+            log.status(f"Cached: {filename}")
+            return dest_path
+        log.status(f"Cached file for {filename} looks truncated - re-downloading")
+        dest_path.unlink(missing_ok=True)
 
     log.status(f"Downloading {filename}...")
     for attempt in range(1, RETRY_ATTEMPTS + 1):

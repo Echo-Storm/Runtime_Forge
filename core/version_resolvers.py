@@ -10,6 +10,7 @@ Every resolver returns a LatestInfo so the version shown in the GUI's
 user clicks Install — no separate/divergent version lookup.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -20,12 +21,45 @@ from core.logger import get_logger
 REQUEST_TIMEOUT = 15
 _HEADERS = {"User-Agent": "AIO-Runtime-Installer"}
 
+_VERSION_RUN = re.compile(r"\d+(?:[.+]\d+)*")
+
 
 @dataclass
 class LatestInfo:
     version: str
     url: str
     filename: str
+
+
+def _numeric_tuple(version: str) -> tuple[int, ...]:
+    """Extracts the leading run of numeric segments from a version string,
+    treating '.' and '+' as equivalent separators — e.g. "21.0.9+10" and
+    "jdk-21.0.9.10-hotspot" both normalize to (21, 0, 9, 10), even though
+    Adoptium's API and its own installer's folder-naming convention don't
+    agree on punctuation for the same version. Returns () if nothing
+    numeric is found."""
+    match = _VERSION_RUN.search(version)
+    if not match:
+        return ()
+    return tuple(int(part) for part in re.split(r"[.+]", match.group(0)))
+
+
+def version_is_newer(latest: str, installed: str) -> bool:
+    """True only if `latest` is unambiguously newer than `installed`.
+
+    Returns False — not "maybe" — whenever either string can't be parsed
+    into a comparable numeric version, so a parsing failure never manifests
+    as a false "update available" or an unwanted reinstall. This also
+    protects against a stale pinned fallback (used when the version API is
+    unreachable) reading as an available "update" that's actually older
+    than what's already installed — only a genuinely greater version
+    triggers True.
+    """
+    latest_tuple = _numeric_tuple(latest)
+    installed_tuple = _numeric_tuple(installed)
+    if not latest_tuple or not installed_tuple:
+        return False
+    return latest_tuple > installed_tuple
 
 
 def get_latest_github_asset(

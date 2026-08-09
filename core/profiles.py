@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import List, Optional
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]')
+_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 
 @dataclass
@@ -32,14 +37,30 @@ def profiles_dir(app_dir: Path) -> Path:
 
 
 def safe_filename(name: str) -> str:
-    cleaned = _INVALID_FILENAME_CHARS.sub("", name).strip()
-    return cleaned or "profile"
+    # Windows silently rejects a handful of names regardless of extension
+    # (CON.json is exactly as invalid as CON) and always strips trailing
+    # dots/spaces from what's asked for — without handling both, a profile
+    # named "CON" or ending in a space/dot reaches path.write_text() and
+    # raises an uncaught OSError on an entirely ordinary "type a name" action.
+    cleaned = _INVALID_FILENAME_CHARS.sub("", name).strip().rstrip(". ")
+    if not cleaned:
+        return "profile"
+    # Windows matches reserved device names against the segment before the
+    # *first* dot, not the whole filename — "PRN.json" is exactly as
+    # blocked as "PRN" (and would become "PRN.json.json" once save_profile
+    # appends its own ".json", still leading with the same blocked segment).
+    if cleaned.split(".", 1)[0].upper() in _RESERVED_NAMES:
+        cleaned = f"{cleaned}_profile"
+    return cleaned
 
 
-def save_profile(app_dir: Path, profile: Profile) -> Path:
+def save_profile(app_dir: Path, profile: Profile) -> Optional[Path]:
     path = profiles_dir(app_dir) / f"{safe_filename(profile.name)}.json"
-    path.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
-    return path
+    try:
+        path.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
+        return path
+    except OSError:
+        return None
 
 
 def load_profile(path: Path) -> Optional[Profile]:

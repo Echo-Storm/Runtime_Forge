@@ -29,6 +29,7 @@ from core import checks
 from core.downloader import download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
+from core.signature import check_signature
 from core.version_resolvers import LatestInfo, get_latest_adoptium, get_latest_github_asset, get_latest_node_lts
 
 PROGRAM_FILES = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
@@ -61,6 +62,20 @@ class Component:
     resolve_latest: Optional[Callable[[], Optional[LatestInfo]]] = None
 
 
+def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    """extractall() with a zip-slip guard. Every zip extracted here came
+    from a network download — a tampered/MITM'd one could otherwise write
+    outside dest_dir via a '../' entry path, since plain extractall() on
+    Python versions before the 3.12 `filter="data"` option performs no such
+    check at all."""
+    dest_dir = dest_dir.resolve()
+    for member in zf.namelist():
+        target = (dest_dir / member).resolve()
+        if target != dest_dir and dest_dir not in target.parents:
+            raise ValueError(f"Unsafe zip entry path (would extract outside destination): {member}")
+    zf.extractall(dest_dir)
+
+
 # ---------------------------------------------------------------------------
 # 7-ZIP PORTABLE (internal helper, not user-selectable — DirectX depends on it)
 # ---------------------------------------------------------------------------
@@ -86,8 +101,8 @@ def ensure_seven_zip(ctx: InstallContext) -> Optional[Path]:
         return None
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(ctx.temp_dir)
-    except (OSError, zipfile.BadZipFile) as e:
+            _safe_extract(zf, ctx.temp_dir)
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
         log.fail(f"Failed to extract 7-Zip portable: {e}")
         return None
     return exe if exe.is_file() else None
@@ -104,9 +119,14 @@ def _winget_is_installed() -> InstalledState:
 
 def _add_appx_package(path: Path) -> bool:
     log = get_logger()
+    check_signature(str(path), "winget (msixbundle)")
+    # See core/signature.py's matching comment: PowerShell needs a literal
+    # single quote inside a single-quoted string doubled, or a path
+    # containing one breaks out of the string and the install fails outright.
+    escaped_path = str(path).replace("'", "''")
     try:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"Add-AppxPackage -Path '{path}'"],
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"Add-AppxPackage -Path '{escaped_path}'"],
             capture_output=True, text=True, timeout=300,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
@@ -141,14 +161,14 @@ def _winget_install(ctx: InstallContext) -> bool:
     try:
         deps_dir = ctx.temp_dir / "winget_deps"
         with zipfile.ZipFile(deps_zip) as zf:
-            zf.extractall(deps_dir)
+            _safe_extract(zf, deps_dir)
         for appx in deps_dir.rglob("*x64.appx"):
             _add_appx_package(appx)
         ok = _add_appx_package(file)
         if ok:
             checks.refresh_path_env()
         return ok
-    except (OSError, zipfile.BadZipFile) as e:
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
         log.fail(f"winget dependency retry failed: {e}")
         return False
 
@@ -279,8 +299,8 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
     extract_dir = ctx.temp_dir / "oal_legacy"
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(extract_dir)
-    except (OSError, zipfile.BadZipFile) as e:
+            _safe_extract(zf, extract_dir)
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
         log.fail(f"Extraction failed: {e}")
         return False
     exe = extract_dir / "oalinst.exe"
@@ -324,8 +344,8 @@ def _openal_install_soft_step(ctx: InstallContext) -> bool:
     extract_dir = ctx.temp_dir / "oal_soft"
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(extract_dir)
-    except (OSError, zipfile.BadZipFile) as e:
+            _safe_extract(zf, extract_dir)
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
         log.fail(f"Extraction failed: {e}")
         return False
 
@@ -674,7 +694,11 @@ def _git_resolve_latest() -> LatestInfo:
 
 
 def _git_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.file_exists(str(_GIT_EXE)))
+    if not _GIT_EXE.is_file():
+        return InstalledState(installed=False)
+    out = checks.command_version(str(_GIT_EXE), ["--version"])
+    version = out.removeprefix("git version ").strip() if out else None
+    return InstalledState(installed=True, version=version)
 
 
 def _git_install(ctx: InstallContext) -> bool:
@@ -703,7 +727,11 @@ def _node_resolve_latest() -> LatestInfo:
 
 
 def _node_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.file_exists(str(_NODE_EXE)))
+    if not _NODE_EXE.is_file():
+        return InstalledState(installed=False)
+    out = checks.command_version(str(_NODE_EXE), ["--version"])
+    version = out.lstrip("v").strip() if out else None
+    return InstalledState(installed=True, version=version)
 
 
 def _node_install(ctx: InstallContext) -> bool:
@@ -729,7 +757,12 @@ def _cmake_resolve_latest() -> LatestInfo:
 
 
 def _cmake_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.file_exists(str(_CMAKE_EXE)))
+    if not _CMAKE_EXE.is_file():
+        return InstalledState(installed=False)
+    out = checks.command_version(str(_CMAKE_EXE), ["--version"])
+    first_line = out.splitlines()[0] if out else ""
+    version = first_line.removeprefix("cmake version ").strip() or None
+    return InstalledState(installed=True, version=version)
 
 
 def _cmake_install(ctx: InstallContext) -> bool:

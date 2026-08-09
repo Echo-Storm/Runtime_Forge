@@ -5,9 +5,13 @@ ScanWorker runs every component's presence/version check off the UI thread
 (registry reads are cheap but version-resolver calls hit the network, and
 32+ components in a row would otherwise freeze the window on launch).
 
-InstallWorker runs the PS1's Install-Component pattern faithfully: skip if
-already installed, run the installer if not, then re-check presence
-afterward so "Installed" in the summary always means "verified present,"
+InstallWorker runs the PS1's Install-Component pattern, extended with real
+update handling: skip only if already installed AND (no version concept, or
+already at the latest version); otherwise run the installer — which for
+every versioned component here (PowerShell/Git/Node/CMake/JDK) upgrades in
+place when a newer version already exists, exactly what "update available"
+in the UI should actually do when acted on. Re-checks presence afterward
+either way so "Installed" in the summary always means "verified present,"
 never just "the installer's exit code looked fine."
 """
 
@@ -19,6 +23,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
 from core.paths import get_app_dir
+from core.version_resolvers import version_is_newer
 
 
 class ScanWorker(QThread):
@@ -69,8 +74,28 @@ class InstallWorker(QThread):
 
     def run(self):
         log = get_logger()
-        log.add_listener(self.log_line.emit)
+        # Captured once into a local, not re-accessed via self.log_line.emit
+        # a second time below — PyQt's bound-signal .emit returns a fresh,
+        # non-equal wrapper object on every attribute access (confirmed:
+        # `obj.sig.emit == obj.sig.emit` is False), unlike a plain Python
+        # bound method. remove_listener() uses list.remove(), which needs
+        # the exact same object identity/equality it was given at
+        # add_listener() time — passing a fresh access here would silently
+        # fail to find it, leaving the "removed" listener still registered.
+        listener = self.log_line.emit
+        log.add_listener(listener)
+        try:
+            self._run(log)
+        finally:
+            # Logger is a long-lived module singleton — without this, every
+            # Install run leaves its listener registered forever, so a
+            # second run in the same session double-emits every log line
+            # (once via its own connection, once via the first run's
+            # still-registered listener) and the duplication compounds with
+            # each further run.
+            log.remove_listener(listener)
 
+    def _run(self, log):
         app_dir = get_app_dir()
         temp_dir = app_dir / "temp_installers"
         if not self.dry_run:
@@ -87,15 +112,26 @@ class InstallWorker(QThread):
             self.component_started.emit(component.key)
 
             try:
-                already = component.is_installed().installed
+                state = component.is_installed()
             except Exception:
-                already = False
+                state = InstalledState(installed=False)
 
-            if already:
-                log.skip(f"{component.name} already installed")
-                skipped_count += 1
-                self.component_finished.emit(component.key, ResultStatus.SKIPPED)
-                continue
+            if state.installed:
+                update_available = False
+                if component.resolve_latest is not None:
+                    try:
+                        latest = component.resolve_latest()
+                        update_available = latest is not None and version_is_newer(latest.version, state.version or "")
+                    except Exception:
+                        update_available = False
+
+                if not update_available:
+                    log.skip(f"{component.name} already installed")
+                    skipped_count += 1
+                    self.component_finished.emit(component.key, ResultStatus.SKIPPED)
+                    continue
+
+                log.status(f"{component.name}: update available ({state.version} -> {latest.version}), installing")
 
             def progress_cb(msg, frac, key=component.key):
                 self.component_progress.emit(key, msg, frac)

@@ -17,11 +17,18 @@ from core.logger import get_logger
 
 def check_signature(path: str, name: str) -> None:
     log = get_logger()
+    # PowerShell escapes a single quote inside a single-quoted string by
+    # doubling it — without this, a path containing one (a legitimate
+    # Windows username like O'Brien, for instance) breaks out of the string
+    # literal and the whole command fails silently, defeating the check
+    # with no warning (status ends up empty, which the guard below treats
+    # as "nothing to report" rather than "the check itself didn't run").
+    escaped_path = path.replace("'", "''")
     try:
         result = subprocess.run(
             [
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                f"(Get-AuthenticodeSignature -LiteralPath '{path}').Status",
+                f"(Get-AuthenticodeSignature -LiteralPath '{escaped_path}').Status",
             ],
             capture_output=True, text=True, timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW,
