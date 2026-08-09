@@ -20,6 +20,7 @@ from enum import Enum, auto
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core import checks, path_backup
 from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
 from core.paths import get_app_dir
@@ -57,9 +58,9 @@ class ResultStatus(Enum):
 
 
 class InstallWorker(QThread):
-    component_started = pyqtSignal(str)                       # key
-    component_progress = pyqtSignal(str, str, float)           # key, message, 0..1
-    component_finished = pyqtSignal(str, object)                # key, ResultStatus
+    component_started = pyqtSignal(str)                        # key
+    component_progress = pyqtSignal(str, str, float)            # key, message, 0..1
+    component_finished = pyqtSignal(str, object, str)            # key, ResultStatus, warning message ("" if none)
     log_line = pyqtSignal(str)
     all_finished = pyqtSignal(int, int, int)                    # installed, skipped, failed
 
@@ -100,6 +101,17 @@ class InstallWorker(QThread):
         temp_dir = app_dir / "temp_installers"
         if not self.dry_run:
             temp_dir.mkdir(parents=True, exist_ok=True)
+            # One backup per batch (an "Install Selected" click), not one per
+            # component in it — installing 5 things makes 1 backup, not 5.
+            # This is a safety net for PATH itself getting mangled, separate
+            # from each component's own "set PATH correctly" install flags.
+            backup_path = path_backup.create_backup(
+                app_dir, f"before installing {len(self.components)} component(s)"
+            )
+            if backup_path:
+                log.status(f"PATH backed up to {backup_path.name}")
+            else:
+                log.status("Could not read current PATH to back it up - continuing anyway")
 
         installed_count = 0
         skipped_count = 0
@@ -128,7 +140,7 @@ class InstallWorker(QThread):
                 if not update_available:
                     log.skip(f"{component.name} already installed")
                     skipped_count += 1
-                    self.component_finished.emit(component.key, ResultStatus.SKIPPED)
+                    self.component_finished.emit(component.key, ResultStatus.SKIPPED, "")
                     continue
 
                 log.status(f"{component.name}: update available ({state.version} -> {latest.version}), installing")
@@ -143,19 +155,19 @@ class InstallWorker(QThread):
             except Exception as e:
                 log.fail(f"{component.name} threw an exception: {e}")
                 failed_count += 1
-                self.component_finished.emit(component.key, ResultStatus.FAILED)
+                self.component_finished.emit(component.key, ResultStatus.FAILED, "")
                 continue
 
             if not ran_ok:
                 log.fail(f"{component.name} install step failed (download or installer error)")
                 failed_count += 1
-                self.component_finished.emit(component.key, ResultStatus.FAILED)
+                self.component_finished.emit(component.key, ResultStatus.FAILED, "")
                 continue
 
             if self.dry_run:
                 log.dry(f"Skipping post-install verification for {component.name} (dry run)")
                 installed_count += 1
-                self.component_finished.emit(component.key, ResultStatus.INSTALLED)
+                self.component_finished.emit(component.key, ResultStatus.INSTALLED, "")
                 continue
 
             try:
@@ -163,14 +175,30 @@ class InstallWorker(QThread):
             except Exception:
                 verified = False
 
-            if verified:
-                log.success(f"{component.name} installed")
-                installed_count += 1
-                self.component_finished.emit(component.key, ResultStatus.INSTALLED)
-            else:
+            if not verified:
                 log.fail(f"{component.name} installer exited cleanly but could not be verified afterward (may need a reboot to finish)")
                 failed_count += 1
-                self.component_finished.emit(component.key, ResultStatus.FAILED)
+                self.component_finished.emit(component.key, ResultStatus.FAILED, "")
+                continue
+
+            # The install and its own presence check both succeeded — but
+            # that check runs several of these binaries by absolute path,
+            # not through PATH resolution, so it would never notice PATH
+            # itself failing to update even though every installer here
+            # requests it (ADD_PATH=1, PrependPath=1, etc).
+            path_warning = ""
+            if component.path_entry is not None:
+                try:
+                    entry = component.path_entry()
+                    if entry is not None and not checks.is_dir_on_path(entry):
+                        path_warning = f"installed but {entry} is not on PATH"
+                        log.status(f"WARNING: {component.name} {path_warning} - you may need to restart your terminal or add it manually")
+                except Exception:
+                    pass
+
+            log.success(f"{component.name} installed")
+            installed_count += 1
+            self.component_finished.emit(component.key, ResultStatus.INSTALLED, path_warning)
 
         if not self.dry_run:
             shutil.rmtree(temp_dir, ignore_errors=True)

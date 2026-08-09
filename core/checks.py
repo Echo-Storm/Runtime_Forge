@@ -101,6 +101,21 @@ def command_on_path(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def is_dir_on_path(dir_path: Path) -> bool:
+    """True if `dir_path` is one of the entries in the effective PATH
+    (machine + user, refreshed from the registry first). This is a
+    genuinely separate question from "does the installed binary run" —
+    every install here already requests its own installer add itself to
+    PATH (ADD_PATH=1, PrependPath=1, etc), but that request can silently
+    fail, and a component whose is_installed() check runs the exe by its
+    known absolute path (git/node/cmake/pwsh all do) would never notice."""
+    refresh_path_env()
+    target = str(dir_path.resolve()).rstrip("\\/").lower()
+    raw = os.environ.get("Path", "")
+    entries = (entry.strip().rstrip("\\/").lower() for entry in raw.split(";") if entry.strip())
+    return target in entries
+
+
 def create_reg_marker_key(hive: str, subkey: str, values: dict[str, str]) -> bool:
     """Creates subkey (if missing) and sets the given string values on it.
     Used when a legacy installer's own silent registration can't be trusted

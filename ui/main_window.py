@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor
 
-from core import profiles
+from core import path_backup, profiles
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_app_dir
@@ -197,6 +197,7 @@ COLOR_UPDATE_AVAILABLE = "#d5c05b"
 COLOR_INSTALLING = "#5b9bd5"
 COLOR_FAILED = "#d56b6b"
 COLOR_SKIPPED = "#8a8f96"
+COLOR_PATH_WARNING = "#e0954a"
 
 
 def _is_admin() -> bool:
@@ -236,6 +237,7 @@ class MainWindow(QMainWindow):
         # no warning. "Select Missing/Outdated" stays available to reapply
         # this deliberately.
         self._initial_scan_done = False
+        self._path_backups_cache: List[path_backup.PathBackup] = []
 
         settings_path = str(self.app_dir / "AIORuntimeInstaller.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
@@ -245,6 +247,7 @@ class MainWindow(QMainWindow):
         self._load_settings()
         self._populate_tree()
         self._refresh_profile_combo()
+        self._refresh_path_backup_combo()
         self._start_scan()
 
     # ------------------------------------------------------------------
@@ -341,6 +344,29 @@ class MainWindow(QMainWindow):
         profile_bar.addWidget(self.profile_import_btn)
 
         layout.addLayout(profile_bar)
+
+        # --- PATH Backups ---
+        path_bar = QHBoxLayout()
+        path_bar.setSpacing(8)
+
+        path_bar.addWidget(QLabel("PATH Backups:"))
+
+        self.path_backup_combo = QComboBox()
+        self.path_backup_combo.setMinimumWidth(320)
+        self.path_backup_combo.setToolTip(
+            "One snapshot per real install run — a safety net in case PATH ever gets mangled, "
+            "separate from each install's own \"set PATH correctly\" flags"
+        )
+        path_bar.addWidget(self.path_backup_combo)
+
+        self.path_backup_restore_btn = QPushButton("Restore...")
+        self.path_backup_restore_btn.setToolTip("Preview and optionally roll PATH back to this snapshot")
+        self.path_backup_restore_btn.clicked.connect(self._on_restore_path_backup)
+        path_bar.addWidget(self.path_backup_restore_btn)
+
+        path_bar.addStretch()
+
+        layout.addLayout(path_bar)
 
         # --- Tree ---
         self.tree = QTreeWidget()
@@ -681,9 +707,67 @@ class MainWindow(QMainWindow):
         if not profile:
             QMessageBox.warning(self, "Import Failed", "That file isn't a valid profile.")
             return
-        profiles.save_profile(self.app_dir, profile)
+        if profiles.save_profile(self.app_dir, profile) is None:
+            QMessageBox.warning(self, "Import Failed", f"Could not save imported profile '{profile.name}'.")
+            return
         self._refresh_profile_combo(select_name=profile.name)
         self.status_bar.showMessage(f"Imported profile '{profile.name}' ({len(profile.component_keys)} component(s))", 5000)
+
+    # ------------------------------------------------------------------
+    # PATH backups
+    # ------------------------------------------------------------------
+
+    def _refresh_path_backup_combo(self):
+        self.path_backup_combo.clear()
+        self._path_backups_cache = path_backup.list_backups(self.app_dir)
+        if not self._path_backups_cache:
+            self.path_backup_combo.addItem("(no backups yet)")
+            self.path_backup_restore_btn.setEnabled(False)
+            return
+        for backup in self._path_backups_cache:
+            self.path_backup_combo.addItem(f"{backup.timestamp} — {backup.reason}")
+        self.path_backup_restore_btn.setEnabled(True)
+
+    def _on_restore_path_backup(self):
+        idx = self.path_backup_combo.currentIndex()
+        if idx < 0 or idx >= len(self._path_backups_cache):
+            return
+        backup = self._path_backups_cache[idx]
+
+        current_machine, current_user = path_backup.read_current_path()
+
+        preview = (
+            f"Restore PATH to the snapshot from {backup.timestamp}?\n"
+            f"({backup.reason})\n\n"
+            f"This will overwrite the CURRENT machine + user PATH values.\n"
+            f"A fresh backup of the current PATH is taken automatically first, "
+            f"so this itself can be undone.\n\n"
+            f"Current machine PATH ({len(current_machine)} chars) vs "
+            f"snapshot ({len(backup.machine_path)} chars)\n"
+            f"Current user PATH ({len(current_user)} chars) vs "
+            f"snapshot ({len(backup.user_path)} chars)"
+        )
+        reply = QMessageBox.question(
+            self, "Restore PATH Backup", preview,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        path_backup.create_backup(self.app_dir, f"before restoring {backup.timestamp}")
+        if path_backup.restore_backup(backup):
+            self._refresh_path_backup_combo()
+            QMessageBox.information(
+                self, "PATH Restored",
+                "PATH has been restored and the change broadcast to running processes.\n"
+                "Some already-open windows (terminals especially) may still need to be "
+                "restarted to pick it up.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Restore Failed",
+                "Could not write PATH to the registry — this needs to run elevated.",
+            )
 
     # ------------------------------------------------------------------
     # Install
@@ -739,11 +823,14 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
         self.status_bar.showMessage(message)
 
-    def _on_component_finished(self, key: str, status: ResultStatus):
+    def _on_component_finished(self, key: str, status: ResultStatus, warning: str):
         item = self.tree_items.get(key)
         if item is None:
             return
-        if status == ResultStatus.INSTALLED:
+        if status == ResultStatus.INSTALLED and warning:
+            item.setText(1, f"Installed — {warning}")
+            item.setForeground(1, self._color(COLOR_PATH_WARNING))
+        elif status == ResultStatus.INSTALLED:
             item.setText(1, "Installed")
             item.setForeground(1, self._color(COLOR_INSTALLED))
         elif status == ResultStatus.SKIPPED:
@@ -764,6 +851,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.status_bar.clearMessage()
         self.summary_label.setText(f"Done — Installed: {installed}  Skipped: {skipped}  Failed: {failed}")
+        if not self.dry_run_checkbox.isChecked():
+            self._refresh_path_backup_combo()  # a real run just created a new one
 
         QMessageBox.information(
             self, "Install Complete",

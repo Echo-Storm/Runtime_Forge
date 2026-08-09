@@ -60,6 +60,14 @@ class Component:
     is_installed: Callable[[], InstalledState]
     install: Callable[[InstallContext], bool]
     resolve_latest: Optional[Callable[[], Optional[LatestInfo]]] = None
+    # The directory this component's installer should add to PATH, for
+    # components where that's a documented part of a working install
+    # (PowerShell/Git/Node/CMake/Python/JDK). A callable, not a static Path
+    # — JDK's install directory embeds its exact patch version
+    # (jdk-21.0.9.10-hotspot) and isn't known until after a real install,
+    # so it has to be resolved fresh each time rather than computed once at
+    # component-registry build time.
+    path_entry: Optional[Callable[[], Optional[Path]]] = None
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
@@ -552,6 +560,14 @@ def _jdk_is_installed(jd: _JdkDef) -> InstalledState:
     return InstalledState(installed=bool(match), version=match.name if match else None)
 
 
+def _jdk_path_entry(jd: _JdkDef) -> Optional[Path]:
+    # Unlike the other Dev Tools, the install directory embeds the exact
+    # patch version (jdk-21.0.9.10-hotspot) and isn't a fixed constant —
+    # has to be resolved the same way presence is, not computed once.
+    match = checks.any_child_dir_matches(str(_ADOPTIUM_ROOT), jd.dir_prefix)
+    return (match / "bin") if match else None
+
+
 def _jdk_resolve_latest(jd: _JdkDef) -> Optional[LatestInfo]:
     return get_latest_adoptium(jd.feature_version, jd.fallback_version)
 
@@ -632,6 +648,10 @@ def _pwsh_is_installed() -> InstalledState:
     return InstalledState(installed=bool(out), version=out)
 
 
+def _pwsh_path_entry() -> Optional[Path]:
+    return _PWSH_EXE.parent
+
+
 def _pwsh_install(ctx: InstallContext) -> bool:
     latest = _pwsh_resolve_latest()
     file = download(latest.url, ctx.temp_dir, latest.filename, f"PowerShell {latest.version}", ctx.dry_run, ctx.progress_cb)
@@ -667,6 +687,10 @@ def _py_dir(py: _PyDef) -> Path:
     return PROGRAM_FILES / f"Python{py.ver.replace('.', '')}"
 
 
+def _py_path_entry(py: _PyDef) -> Optional[Path]:
+    return _py_dir(py)
+
+
 def _py_is_installed(py: _PyDef) -> InstalledState:
     installed = checks.file_exists(str(_py_dir(py) / "python.exe"))
     return InstalledState(installed=installed, version=py.ver if installed else None)
@@ -687,6 +711,11 @@ _GIT_PATTERN = re.compile(r"^Git-[\d.]+-64-bit\.exe$")
 _GIT_FALLBACK_URL = "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/Git-2.54.0-64-bit.exe"
 _GIT_FALLBACK_VERSION = "2.54.0"
 _GIT_EXE = PROGRAM_FILES / "Git" / "bin" / "git.exe"
+# Git's own installer adds `cmd\`, not `bin\`, to PATH by default — `bin\`
+# also has a git.exe but additionally carries the full MSYS/POSIX toolset
+# (sh.exe, ls.exe, etc), which Git for Windows deliberately keeps off the
+# global PATH to avoid shadowing Windows' own built-ins of the same name.
+_GIT_CMD_DIR = PROGRAM_FILES / "Git" / "cmd"
 
 
 def _git_resolve_latest() -> LatestInfo:
@@ -699,6 +728,10 @@ def _git_is_installed() -> InstalledState:
     out = checks.command_version(str(_GIT_EXE), ["--version"])
     version = out.removeprefix("git version ").strip() if out else None
     return InstalledState(installed=True, version=version)
+
+
+def _git_path_entry() -> Optional[Path]:
+    return _GIT_CMD_DIR
 
 
 def _git_install(ctx: InstallContext) -> bool:
@@ -734,6 +767,10 @@ def _node_is_installed() -> InstalledState:
     return InstalledState(installed=True, version=version)
 
 
+def _node_path_entry() -> Optional[Path]:
+    return _NODE_EXE.parent
+
+
 def _node_install(ctx: InstallContext) -> bool:
     latest = _node_resolve_latest()
     file = download(latest.url, ctx.temp_dir, latest.filename, f"Node.js {latest.version}", ctx.dry_run, ctx.progress_cb)
@@ -763,6 +800,10 @@ def _cmake_is_installed() -> InstalledState:
     first_line = out.splitlines()[0] if out else ""
     version = first_line.removeprefix("cmake version ").strip() or None
     return InstalledState(installed=True, version=version)
+
+
+def _cmake_path_entry() -> Optional[Path]:
+    return _CMAKE_EXE.parent
 
 
 def _cmake_install(ctx: InstallContext) -> bool:
@@ -825,6 +866,7 @@ def build_components() -> List[Component]:
             lambda jd=jd: _jdk_is_installed(jd),
             lambda ctx, jd=jd: _jdk_install(jd, ctx),
             lambda jd=jd: _jdk_resolve_latest(jd),
+            path_entry=lambda jd=jd: _jdk_path_entry(jd),
         ))
 
     for py in _PY_DEFS:
@@ -832,13 +874,14 @@ def build_components() -> List[Component]:
             f"python_{py.ver}", f"Python {py.ver}", "Python",
             lambda py=py: _py_is_installed(py),
             lambda ctx, py=py: _py_install(py, ctx),
+            path_entry=lambda py=py: _py_path_entry(py),
         ))
 
     components += [
-        Component("pwsh", "PowerShell 7", "Dev Tools", _pwsh_is_installed, _pwsh_install, _pwsh_resolve_latest),
-        Component("git", "Git for Windows", "Dev Tools", _git_is_installed, _git_install, _git_resolve_latest),
-        Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest),
-        Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest),
+        Component("pwsh", "PowerShell 7", "Dev Tools", _pwsh_is_installed, _pwsh_install, _pwsh_resolve_latest, path_entry=_pwsh_path_entry),
+        Component("git", "Git for Windows", "Dev Tools", _git_is_installed, _git_install, _git_resolve_latest, path_entry=_git_path_entry),
+        Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest, path_entry=_node_path_entry),
+        Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry),
         Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install),
     ]
 

@@ -19,6 +19,21 @@ What's different from the PowerShell version
   own checkbox, not an all-or-nothing run.
 - **Dry Run** toggle previews every download/install without touching the
   system, same as the original's `-DryRun`.
+- **Real update handling, not just detection** — checking an "update
+  available" row and clicking Install actually upgrades it (PowerShell,
+  Git, Node, CMake, JDKs all support in-place upgrade via their own
+  installers); it doesn't just skip because something's already present.
+- **PATH verification** — every install already requests PATH be updated
+  (`ADD_PATH=1`, `PrependPath=1`, etc, the same flags this project's PS1
+  predecessor added specifically to fix silent-install PATH gaps), but a
+  flag can still silently fail to apply. After install, the tool checks
+  whether the install directory is actually on PATH and flags it distinctly
+  if not, instead of only confirming the software itself is present.
+- **PATH backups** — one automatic snapshot of the machine + user PATH per
+  real install run (not per component), restorable from a dropdown with a
+  before/after preview. A safety net for the rare case a batch of installs
+  (or anything else) leaves PATH in a bad state — restoring itself takes a
+  fresh backup first, so it's never a one-way door either.
 - Fully Python install engine — no PowerShell dependency at runtime, aside
   from a single narrow read-only Authenticode signature check and the
   winget `.msixbundle` install step (Windows has no other ergonomic API for

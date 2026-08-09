@@ -63,7 +63,7 @@ def after_scan():
             target = outdated[0]
             worker = InstallWorker(window.components, {target}, dry_run=True)
             outcomes = {}
-            worker.component_finished.connect(lambda key, status: outcomes.__setitem__(key, status))
+            worker.component_finished.connect(lambda key, status, warning: outcomes.__setitem__(key, status))
             worker.run()  # synchronous call, not .start() — fine for a dry run in a test
             results["install_worker_does_not_skip_outdated"] = outcomes.get(target) == ResultStatus.INSTALLED
 
@@ -71,7 +71,7 @@ def after_scan():
             target = current[0]
             worker2 = InstallWorker(window.components, {target}, dry_run=True)
             outcomes2 = {}
-            worker2.component_finished.connect(lambda key, status: outcomes2.__setitem__(key, status))
+            worker2.component_finished.connect(lambda key, status, warning: outcomes2.__setitem__(key, status))
             worker2.run()
             results["install_worker_still_skips_current"] = outcomes2.get(target) == ResultStatus.SKIPPED
         else:
