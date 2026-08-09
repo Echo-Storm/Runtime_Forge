@@ -4,17 +4,21 @@ Steel/blue dark theme.
 """
 
 import ctypes
-from typing import Optional
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QCheckBox,
     QProgressBar, QMessageBox, QHeaderView, QFrame, QStatusBar,
-    QTextEdit, QSizePolicy, QAbstractItemView,
+    QTextEdit, QSizePolicy, QAbstractItemView, QComboBox, QInputDialog,
+    QFileDialog,
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor
 
+from core import profiles
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_app_dir
@@ -220,6 +224,10 @@ class MainWindow(QMainWindow):
         self.scan_worker: Optional[ScanWorker] = None
         self.install_worker: Optional[InstallWorker] = None
 
+        self._profiles_cache: List[profiles.Profile] = []
+        self._applying_profile = False
+        self._active_profile_name: Optional[str] = None
+
         settings_path = str(self.app_dir / "AIORuntimeInstaller.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
 
@@ -227,6 +235,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._load_settings()
         self._populate_tree()
+        self._refresh_profile_combo()
         self._start_scan()
 
     # ------------------------------------------------------------------
@@ -283,6 +292,46 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(toolbar)
 
+        # --- Profiles ---
+        profile_bar = QHBoxLayout()
+        profile_bar.setSpacing(8)
+
+        profile_bar.addWidget(QLabel("Profile:"))
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(220)
+        self.profile_combo.setToolTip("A saved selection preset — pick one to check exactly those components")
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_combo_changed)
+        profile_bar.addWidget(self.profile_combo)
+
+        self.profile_save_as_btn = QPushButton("Save As...")
+        self.profile_save_as_btn.setToolTip("Save the current checkbox selection as a new named profile")
+        self.profile_save_as_btn.clicked.connect(self._on_save_profile_as)
+        profile_bar.addWidget(self.profile_save_as_btn)
+
+        self.profile_update_btn = QPushButton("Update")
+        self.profile_update_btn.setToolTip("Overwrite the selected profile with the current checkbox selection")
+        self.profile_update_btn.clicked.connect(self._on_update_profile)
+        profile_bar.addWidget(self.profile_update_btn)
+
+        self.profile_delete_btn = QPushButton("Delete")
+        self.profile_delete_btn.clicked.connect(self._on_delete_profile)
+        profile_bar.addWidget(self.profile_delete_btn)
+
+        profile_bar.addStretch()
+
+        self.profile_export_btn = QPushButton("Export...")
+        self.profile_export_btn.setToolTip("Save the selected profile to a file — carry it to another machine")
+        self.profile_export_btn.clicked.connect(self._on_export_profile)
+        profile_bar.addWidget(self.profile_export_btn)
+
+        self.profile_import_btn = QPushButton("Import...")
+        self.profile_import_btn.setToolTip("Load a profile file exported from another machine")
+        self.profile_import_btn.clicked.connect(self._on_import_profile)
+        profile_bar.addWidget(self.profile_import_btn)
+
+        layout.addLayout(profile_bar)
+
         # --- Tree ---
         self.tree = QTreeWidget()
         self.tree.setColumnCount(4)
@@ -294,6 +343,7 @@ class MainWindow(QMainWindow):
         self.tree.setAlternatingRowColors(True)
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tree.itemChanged.connect(self._on_tree_item_changed)
         layout.addWidget(self.tree, stretch=3)
 
         # --- Log pane ---
@@ -469,6 +519,143 @@ class MainWindow(QMainWindow):
 
     def _selected_keys(self) -> set[str]:
         return {key for key, item in self.tree_items.items() if item.checkState(0) == Qt.CheckState.Checked}
+
+    # ------------------------------------------------------------------
+    # Profiles
+    # ------------------------------------------------------------------
+
+    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
+        # Any manual checkbox edit invalidates "this matches a saved
+        # profile" — reset the combo to Custom rather than silently implying
+        # the current selection still matches whatever was last loaded.
+        # _active_profile_name deliberately does NOT get cleared here: it's
+        # what "Update" saves back to, and the whole point of Update is
+        # "I loaded a profile, tweaked the selection, now save that back" —
+        # if editing cleared it too, Update would go permanently disabled
+        # the instant you made the one edit you actually wanted to save.
+        if column != 0 or self._applying_profile:
+            return
+        if self.profile_combo.currentIndex() != 0:
+            self.profile_combo.blockSignals(True)
+            self.profile_combo.setCurrentIndex(0)
+            self.profile_combo.blockSignals(False)
+            self._update_profile_buttons_enabled()
+
+    def _refresh_profile_combo(self, select_name: Optional[str] = None):
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        self.profile_combo.addItem("— Custom (unsaved) —")
+        self._profiles_cache = profiles.list_profiles(self.app_dir)
+        for profile in self._profiles_cache:
+            self.profile_combo.addItem(profile.name)
+        if select_name:
+            idx = self.profile_combo.findText(select_name)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+        self.profile_combo.blockSignals(False)
+        self._update_profile_buttons_enabled()
+
+    def _current_profile_name(self) -> Optional[str]:
+        """The profile literally shown in the combo right now — None while
+        it reads "Custom" (i.e. the tree no longer matches anything saved).
+        Used by Delete/Export, which act on a specific saved profile."""
+        idx = self.profile_combo.currentIndex()
+        return self.profile_combo.currentText() if idx > 0 else None
+
+    def _update_profile_buttons_enabled(self):
+        self.profile_update_btn.setEnabled(self._active_profile_name is not None)
+        has_selected = self._current_profile_name() is not None
+        self.profile_delete_btn.setEnabled(has_selected)
+        self.profile_export_btn.setEnabled(has_selected)
+
+    def _on_profile_combo_changed(self, index: int):
+        name = self._current_profile_name()
+        if name is not None:
+            self._active_profile_name = name
+        self._update_profile_buttons_enabled()
+        if name is None:
+            return
+        profile = next((p for p in self._profiles_cache if p.name == name), None)
+        if profile is None:
+            return
+
+        keys = set(profile.component_keys)
+        self._applying_profile = True
+        for key, item in self.tree_items.items():
+            item.setCheckState(0, Qt.CheckState.Checked if key in keys else Qt.CheckState.Unchecked)
+        self._applying_profile = False
+
+        unknown = keys - set(self.tree_items.keys())
+        msg = f"Loaded profile '{name}' — {len(keys)} component(s) selected"
+        if unknown:
+            msg += f" ({len(unknown)} no longer exist and were skipped)"
+        self.status_bar.showMessage(msg, 5000)
+
+    def _on_save_profile_as(self):
+        name, ok = QInputDialog.getText(self, "Save Profile", "Profile name:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        self._write_profile(name)
+
+    def _on_update_profile(self):
+        # Targets _active_profile_name (survives edits), not
+        # _current_profile_name() (resets to Custom on the first edit) —
+        # otherwise "load a profile, tweak it, click Update" could never
+        # work, since the tweak itself disables the button.
+        if self._active_profile_name:
+            self._write_profile(self._active_profile_name)
+
+    def _write_profile(self, name: str):
+        selected = sorted(self._selected_keys())
+        profile = profiles.Profile(name=name, component_keys=selected, created=datetime.now().isoformat(timespec="seconds"))
+        profiles.save_profile(self.app_dir, profile)
+        self._active_profile_name = name
+        self._refresh_profile_combo(select_name=name)
+        self.status_bar.showMessage(f"Saved profile '{name}' ({len(selected)} component(s))", 5000)
+
+    def _on_delete_profile(self):
+        name = self._current_profile_name()
+        if not name:
+            return
+        reply = QMessageBox.question(
+            self, "Delete Profile", f"Delete profile '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        profiles.delete_profile(self.app_dir, name)
+        if self._active_profile_name == name:
+            self._active_profile_name = None
+        self._refresh_profile_combo()
+        self.status_bar.showMessage(f"Deleted profile '{name}'", 5000)
+
+    def _on_export_profile(self):
+        name = self._current_profile_name()
+        if not name:
+            return
+        profile = next((p for p in self._profiles_cache if p.name == name), None)
+        if not profile:
+            return
+        dest, _ = QFileDialog.getSaveFileName(self, "Export Profile", f"{name}.json", "JSON Files (*.json)")
+        if not dest:
+            return
+        if profiles.export_profile(profile, Path(dest)):
+            self.status_bar.showMessage(f"Exported to {dest}", 5000)
+        else:
+            QMessageBox.warning(self, "Export Failed", "Could not write the profile file.")
+
+    def _on_import_profile(self):
+        src, _ = QFileDialog.getOpenFileName(self, "Import Profile", "", "JSON Files (*.json)")
+        if not src:
+            return
+        profile = profiles.load_profile(Path(src))
+        if not profile:
+            QMessageBox.warning(self, "Import Failed", "That file isn't a valid profile.")
+            return
+        profiles.save_profile(self.app_dir, profile)
+        self._refresh_profile_combo(select_name=profile.name)
+        self.status_bar.showMessage(f"Imported profile '{profile.name}' ({len(profile.component_keys)} component(s))", 5000)
 
     # ------------------------------------------------------------------
     # Install
