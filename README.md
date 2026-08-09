@@ -51,6 +51,19 @@ distribute. It's portable: settings (`AIORuntimeInstaller.ini`) and log
 files are written next to the exe, nothing touches the registry except the
 components you choose to install.
 
+Dev tools
+---------
+- `tools/gen_icon.py` — regenerates `assets/icon.ico`/`icon.png`. Needs
+  Pillow (`pip install -r requirements-dev.txt`).
+- `tools/inspect_dll_version.py <path> [field ...]` — prints a DLL/EXE's PE
+  VERSIONINFO fields (ProductName, ProductVersion, etc). This is what caught
+  the OpenAL false-positive (an NVIDIA-bundled OpenAL32.dll passing a
+  filename-only check) — reach for it before guessing at a detection fix
+  when two binaries share a filename but not an identity.
+- `tests/test_profiles_ui.py` — drives a real MainWindow instance to
+  exercise the Profiles feature end to end (not a pytest suite, run
+  directly: `venv\Scripts\python.exe tests\test_profiles_ui.py`).
+
 What It Installs / Enables
 -----------------------------------------------
 Same list as the original, grouped for the tree view:
