@@ -101,6 +101,26 @@ def command_on_path(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def create_reg_marker_key(hive: str, subkey: str, values: dict[str, str]) -> bool:
+    """Creates subkey (if missing) and sets the given string values on it.
+    Used when a legacy installer's own silent registration can't be trusted
+    to run — e.g. oalinst.exe's /S mode was confirmed (on a real machine) to
+    exit 0 without writing anything at all, seemingly because it does its
+    own internal version check against whatever OpenAL32.dll is already
+    present and silently no-ops if that looks newer than what it would
+    install. Writing the marker ourselves guarantees the actual thing games
+    check for — the key's mere existence — regardless of that installer's
+    own undocumented behavior on modern Windows.
+    """
+    try:
+        with winreg.CreateKeyEx(_HIVES[hive], subkey, 0, winreg.KEY_SET_VALUE) as key:
+            for name, value in values.items():
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+        return True
+    except OSError:
+        return False
+
+
 def any_reg_key_exists(hive: str, subkeys: list[str]) -> bool:
     """True if any of the given subkeys exists under hive — some products
     (WebView2's per-machine Clients key, notably) register under

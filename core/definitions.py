@@ -264,7 +264,8 @@ def _openal_dll_is_soft() -> Optional[str]:
 def _openal_is_installed() -> InstalledState:
     has_key = _openal_has_legacy_key()
     soft_version = _openal_dll_is_soft()
-    return InstalledState(installed=bool(has_key and soft_version), version=soft_version)
+    installed = bool(has_key and soft_version)
+    return InstalledState(installed=installed, version=soft_version if installed else None)
 
 
 def _openal_install_legacy_step(ctx: InstallContext) -> bool:
@@ -273,6 +274,7 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
     if not zip_path:
         return False
     if ctx.dry_run:
+        log.dry("Would plant HKLM\\SOFTWARE\\Creative Labs\\OpenAL compatibility registry key")
         return True
     extract_dir = ctx.temp_dir / "oal_legacy"
     try:
@@ -282,10 +284,31 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
         log.fail(f"Extraction failed: {e}")
         return False
     exe = extract_dir / "oalinst.exe"
-    if not exe.is_file():
-        log.fail("oalinst.exe not found")
-        return False
-    return run_exe(exe, ["/S"], "OpenAL (Legacy compat)", ctx.dry_run)
+    if exe.is_file():
+        # Best-effort: on a genuinely bare machine (no pre-existing
+        # OpenAL32.dll of any kind) this may do a real, fuller install.
+        # Its own exit code isn't trusted as the final word, though — see
+        # the marker-key write below.
+        run_exe(exe, ["/S"], "OpenAL (Legacy compat)", ctx.dry_run)
+
+    if checks.reg_key_exists("HKLM", _OPENAL_LEGACY_REG_PATHS[0]):
+        return True
+
+    # oalinst.exe's silent mode can't be trusted to actually register
+    # anything on modern Windows — confirmed on a real machine: it exited 0
+    # but wrote nothing to the registry at all (native, WOW6432Node, HKCU,
+    # or even UAC's VirtualStore redirect), apparently because it does its
+    # own internal version check against whatever OpenAL32.dll is already
+    # present and silently no-ops if that looks newer than what it ships.
+    # The key's only real job is being present for old installers that
+    # check for it, so guarantee it directly rather than depend on that.
+    if checks.create_reg_marker_key("HKLM", _OPENAL_LEGACY_REG_PATHS[0], {
+        "InstalledBy": "AIO Runtime Installer (OpenAL Soft runtime underneath)",
+    }):
+        return True
+
+    log.fail("Could not create OpenAL compatibility registry key")
+    return False
 
 
 def _openal_install_soft_step(ctx: InstallContext) -> bool:
