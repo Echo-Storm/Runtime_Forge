@@ -310,13 +310,25 @@ class _VCDef:
     base: str
     flags: List[str]
     url: str
+    uninstall_pattern: Optional["re.Pattern[str]"] = None
 
 
 _VC_DEFS = [
-    _VCDef("2005_x86", "8.0", ["/q:a"], "https://download.microsoft.com/download/8/B/4/8B42259F-5D70-43F4-AC2E-4B208FD8D66A/vcredist_x86.exe"),
-    _VCDef("2005_x64", "8.0", ["/q:a"], "https://download.microsoft.com/download/8/B/4/8B42259F-5D70-43F4-AC2E-4B208FD8D66A/vcredist_x64.exe"),
-    _VCDef("2008_x86", "9.0", ["/q"], "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x86.exe"),
-    _VCDef("2008_x64", "9.0", ["/q"], "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe"),
+    # 2005/2008 predate the MSI "provider key" dependency-tracking mechanism
+    # (2012+ era) and never register under Installer\Dependencies — they
+    # only ever show up in the classic Uninstall (Programs and Features)
+    # key, and with an inconsistent naming scheme per year: 2005's x86
+    # package omits the arch tag entirely, 2008 uses " - x86"/" - x64"
+    # rather than the "(x86)"/"(x64)" suffix later years use. Confirmed
+    # against a real machine with both years actually installed.
+    _VCDef("2005_x86", "8.0", ["/q:a"], "https://download.microsoft.com/download/8/B/4/8B42259F-5D70-43F4-AC2E-4B208FD8D66A/vcredist_x86.exe",
+           uninstall_pattern=re.compile(r"^Microsoft Visual C\+\+ 2005 Redistributable$", re.IGNORECASE)),
+    _VCDef("2005_x64", "8.0", ["/q:a"], "https://download.microsoft.com/download/8/B/4/8B42259F-5D70-43F4-AC2E-4B208FD8D66A/vcredist_x64.exe",
+           uninstall_pattern=re.compile(r"Visual C\+\+ 2005 Redistributable \(x64\)", re.IGNORECASE)),
+    _VCDef("2008_x86", "9.0", ["/q"], "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x86.exe",
+           uninstall_pattern=re.compile(r"Visual C\+\+ 2008 Redistributable - x86", re.IGNORECASE)),
+    _VCDef("2008_x64", "9.0", ["/q"], "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
+           uninstall_pattern=re.compile(r"Visual C\+\+ 2008 Redistributable - x64", re.IGNORECASE)),
     _VCDef("2010_x86", "10.0", ["/q"], "https://catalog.s.download.windowsupdate.com/msdownload/update/software/secu/2011/07/vcredist_x86_28c54491be70c38c97849c3d8cfbfdd0d3c515cb.exe"),
     _VCDef("2010_x64", "10.0", ["/q"], "https://catalog.s.download.windowsupdate.com/msdownload/update/software/secu/2011/07/vcredist_x64_15d032d669078aa6f0f7fd1cbf4115a070bd034d.exe"),
     _VCDef("2012_x86", "11.0", ["/passive", "/norestart"], "https://download.microsoft.com/download/1/6/B/16B06F60-3B20-4FF2-B699-5E9B7962F9AE/vcredist_x86.exe"),
@@ -338,15 +350,22 @@ def _vc_is_installed(vc: _VCDef) -> InstalledState:
         if v:
             return InstalledState(installed=True, version=v)
 
-    # Fallback: newer VC++ installers (14.30+) don't always populate the
-    # classic VCRedist key above but do register under Installer\Dependencies
-    # (confirmed on a real machine: 2015-2022 x64 was actually installed and
-    # invisible to the check above, present here as expected).
-    year_label = vc.key.rsplit("_", 1)[0]
-    pattern = re.compile(rf"Visual C\+\+ {re.escape(year_label)}.*\({re.escape(arch)}\)", re.IGNORECASE)
-    version = checks.find_dependency_by_display_name(pattern)
-    if version:
-        return InstalledState(installed=True, version=version)
+    if vc.uninstall_pattern is not None:
+        # 2005/2008: only ever registered in the classic Uninstall key.
+        version = checks.find_uninstall_entry_by_display_name(vc.uninstall_pattern)
+        if version:
+            return InstalledState(installed=True, version=version)
+    else:
+        # 2010+: newer VC++ installers (14.30+) don't always populate the
+        # classic VCRedist key above but do register under
+        # Installer\Dependencies (confirmed on a real machine: 2012/2013/
+        # 2015-2022 were all actually installed and invisible to the check
+        # above, present here as expected).
+        year_label = vc.key.rsplit("_", 1)[0]
+        pattern = re.compile(rf"Visual C\+\+ {re.escape(year_label)}.*\({re.escape(arch)}\)", re.IGNORECASE)
+        version = checks.find_dependency_by_display_name(pattern)
+        if version:
+            return InstalledState(installed=True, version=version)
 
     return InstalledState(installed=False)
 

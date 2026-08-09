@@ -99,6 +99,48 @@ def any_reg_key_exists(hive: str, subkeys: list[str]) -> bool:
     return any(reg_key_exists(hive, subkey) for subkey in subkeys)
 
 
+_UNINSTALL_ROOTS = [
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+]
+
+
+def find_uninstall_entry_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:
+    """Scans the classic Programs-and-Features Uninstall keys (both the
+    native and WOW6432Node views) for a DisplayName matching `pattern`,
+    returning its DisplayVersion or None.
+
+    Some older redistributables (2005, 2008) predate the MSI "provider key"
+    dependency-tracking mechanism entirely (that's a 2012+ era feature) —
+    they only ever show up here, in the same place Programs and Features
+    itself reads from, not under Installer\\Dependencies.
+    """
+    for root in _UNINSTALL_ROOTS:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as uninstall_key:
+                i = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(uninstall_key, i)
+                    except OSError:
+                        break
+                    i += 1
+                    try:
+                        with winreg.OpenKey(uninstall_key, subkey_name) as entry:
+                            display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
+                            if pattern.search(display_name):
+                                try:
+                                    version, _ = winreg.QueryValueEx(entry, "DisplayVersion")
+                                except OSError:
+                                    version = None
+                                return version or display_name
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return None
+
+
 def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:
     """Scans HKLM\\SOFTWARE\\Classes\\Installer\\Dependencies\\* for a
     DisplayName matching `pattern`, returning its Version or None.
