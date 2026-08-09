@@ -337,6 +337,17 @@ def _vc_is_installed(vc: _VCDef) -> InstalledState:
         v = checks.reg_value("HKLM", hive_root, "Version")
         if v:
             return InstalledState(installed=True, version=v)
+
+    # Fallback: newer VC++ installers (14.30+) don't always populate the
+    # classic VCRedist key above but do register under Installer\Dependencies
+    # (confirmed on a real machine: 2015-2022 x64 was actually installed and
+    # invisible to the check above, present here as expected).
+    year_label = vc.key.rsplit("_", 1)[0]
+    pattern = re.compile(rf"Visual C\+\+ {re.escape(year_label)}.*\({re.escape(arch)}\)", re.IGNORECASE)
+    version = checks.find_dependency_by_display_name(pattern)
+    if version:
+        return InstalledState(installed=True, version=version)
+
     return InstalledState(installed=False)
 
 
@@ -361,7 +372,10 @@ class _NetDef:
     url: str
     ver: Optional[str] = None
     min_release: Optional[int] = None
+    shared_fx: Optional[str] = None
 
+
+_DOTNET_SHARED_ROOT = PROGRAM_FILES / "dotnet" / "shared"
 
 _NET_DEFS = [
     _NetDef(".NET Framework 4.8.1", "ndp481.exe", ["/q", "/norestart"], True,
@@ -369,22 +383,22 @@ _NET_DEFS = [
             "https://go.microsoft.com/fwlink/?linkid=2202440", min_release=528040),
     _NetDef(".NET 8 ASP.NET Core Runtime", "aspnetcore-8.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.AspNetCore.App",
-            "https://aka.ms/dotnet/8.0/aspnetcore-runtime-win-x64.exe", ver="8.0"),
+            "https://aka.ms/dotnet/8.0/aspnetcore-runtime-win-x64.exe", ver="8.0", shared_fx="Microsoft.AspNetCore.App"),
     _NetDef(".NET 8 Desktop Runtime", "desktop-8.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App",
-            "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe", ver="8.0"),
+            "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe", ver="8.0", shared_fx="Microsoft.WindowsDesktop.App"),
     _NetDef(".NET 9 ASP.NET Core Runtime", "aspnetcore-9.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.AspNetCore.App",
-            "https://aka.ms/dotnet/9.0/aspnetcore-runtime-win-x64.exe", ver="9.0"),
+            "https://aka.ms/dotnet/9.0/aspnetcore-runtime-win-x64.exe", ver="9.0", shared_fx="Microsoft.AspNetCore.App"),
     _NetDef(".NET 9 Desktop Runtime", "desktop-9.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App",
-            "https://aka.ms/dotnet/9.0/windowsdesktop-runtime-win-x64.exe", ver="9.0"),
+            "https://aka.ms/dotnet/9.0/windowsdesktop-runtime-win-x64.exe", ver="9.0", shared_fx="Microsoft.WindowsDesktop.App"),
     _NetDef(".NET 10 ASP.NET Core Runtime", "aspnetcore-10.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.AspNetCore.App",
-            "https://aka.ms/dotnet/10.0/aspnetcore-runtime-win-x64.exe", ver="10.0"),
+            "https://aka.ms/dotnet/10.0/aspnetcore-runtime-win-x64.exe", ver="10.0", shared_fx="Microsoft.AspNetCore.App"),
     _NetDef(".NET 10 Desktop Runtime", "desktop-10.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App",
-            "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe", ver="10.0"),
+            "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe", ver="10.0", shared_fx="Microsoft.WindowsDesktop.App"),
 ]
 
 
@@ -393,6 +407,17 @@ def _net_is_installed(nd: _NetDef) -> InstalledState:
         rel = checks.reg_value_int("HKLM", nd.reg, "Release")
         installed = bool(rel and nd.min_release and rel >= nd.min_release)
         return InstalledState(installed=installed, version=str(rel) if rel else None)
+
+    # The registry key (HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\...) is
+    # only reliably populated by the classic MSI installer. Runtimes placed
+    # by winget or the dotnet-install script leave it empty despite being
+    # fully installed and visible to `dotnet --list-runtimes` — confirmed on
+    # a real machine (8/9/10 all present on disk, registry key absent). The
+    # shared framework folder is the ground truth `dotnet` itself reads from.
+    match = checks.any_child_dir_matches(str(_DOTNET_SHARED_ROOT / nd.shared_fx), f"{nd.ver}.")
+    if match:
+        return InstalledState(installed=True, version=match.name)
+
     installed = checks.reg_key_exists("HKLM", f"{nd.reg}\\{nd.ver}")
     return InstalledState(installed=installed, version=nd.ver if installed else None)
 
@@ -447,7 +472,13 @@ def _jdk_install(jd: _JdkDef, ctx: InstallContext) -> bool:
 # ---------------------------------------------------------------------------
 
 def _vulkan_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.reg_key_exists("HKLM", r"SOFTWARE\Khronos\Vulkan\Runtime"))
+    # The Runtime registry key isn't always written (confirmed on a real
+    # machine: absent despite vulkan-1.dll being present and the runtime
+    # fully usable) — vulkan-1.dll in System32 is the loader every Vulkan
+    # app actually depends on, so its presence is the more reliable signal.
+    has_reg = checks.reg_key_exists("HKLM", r"SOFTWARE\Khronos\Vulkan\Runtime")
+    has_dll = checks.file_exists(str(SYSTEM_ROOT / "System32" / "vulkan-1.dll"))
+    return InstalledState(installed=has_reg or has_dll)
 
 
 def _vulkan_install(ctx: InstallContext) -> bool:
@@ -461,11 +492,19 @@ def _vulkan_install(ctx: InstallContext) -> bool:
 # WEBVIEW2
 # ---------------------------------------------------------------------------
 
-_WEBVIEW2_REG = r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_CLIENT_ID = r"{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 
 def _webview2_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.reg_key_exists("HKLM", _WEBVIEW2_REG))
+    # The per-machine WebView2 Evergreen Runtime commonly registers its
+    # Clients key under WOW6432Node even on a 64-bit OS (confirmed on a real
+    # machine: absent from the plain HKLM path, present under WOW6432Node) —
+    # same pattern as the Chromium-based updater family in general.
+    installed = checks.any_reg_key_exists("HKLM", [
+        rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_ID}",
+        rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_ID}",
+    ])
+    return InstalledState(installed=installed)
 
 
 def _webview2_install(ctx: InstallContext) -> bool:

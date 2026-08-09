@@ -7,6 +7,7 @@ inline per component.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import winreg
@@ -88,6 +89,49 @@ def command_on_path(name: str) -> Optional[str]:
         return found
     refresh_path_env()
     return shutil.which(name)
+
+
+def any_reg_key_exists(hive: str, subkeys: list[str]) -> bool:
+    """True if any of the given subkeys exists under hive — some products
+    (WebView2's per-machine Clients key, notably) register under
+    WOW6432Node even on a 64-bit OS instead of the plain 64-bit view, so a
+    single-path check can false-negative on a real install."""
+    return any(reg_key_exists(hive, subkey) for subkey in subkeys)
+
+
+def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:
+    """Scans HKLM\\SOFTWARE\\Classes\\Installer\\Dependencies\\* for a
+    DisplayName matching `pattern`, returning its Version or None.
+
+    Modern VC++ redistributable installers (14.30+) don't always populate
+    the classic VisualStudio\\<ver>\\VC\\VCRedist registry key that older
+    ones did — but they do register here, which is also what Programs and
+    Features reads from. Falls back to this only when the classic key
+    check comes up empty.
+    """
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\Installer\Dependencies") as deps_key:
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(deps_key, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(deps_key, subkey_name) as entry:
+                        display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
+                        if pattern.search(display_name):
+                            try:
+                                version, _ = winreg.QueryValueEx(entry, "Version")
+                            except OSError:
+                                version = None
+                            return version or display_name
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return None
 
 
 def command_version(exe_path: str, args: list[str]) -> Optional[str]:
