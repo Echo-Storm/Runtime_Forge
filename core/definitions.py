@@ -225,16 +225,51 @@ def _directx_install(ctx: InstallContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# LEGACY OPENAL
+# OPENAL (Legacy compatibility registration + OpenAL Soft runtime)
 # ---------------------------------------------------------------------------
+# One combo component, not two. They aren't independent: both write to the
+# exact same OpenAL32.dll path, and Legacy OpenAL's only real purpose here
+# is planting the HKLM\SOFTWARE\Creative Labs\OpenAL registry key that some
+# old game installers check for before deciding whether to nag about/bundle
+# their own OpenAL — the actual DLL that ends up loaded should always be
+# Soft's modern, actively-maintained implementation. Doing them as one unit
+# means "installed" can mean "both parts of that story are actually true"
+# instead of two components that silently fight over the same file.
 
-def _legacy_openal_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.reg_key_exists("HKLM", r"SOFTWARE\Creative Labs\OpenAL"))
+_OPENAL_DLL_PATHS = (SYSTEM_ROOT / "System32" / "OpenAL32.dll", SYSTEM_ROOT / "SysWOW64" / "OpenAL32.dll")
+_OPENAL_LEGACY_REG_PATHS = [r"SOFTWARE\Creative Labs\OpenAL", r"SOFTWARE\WOW6432Node\Creative Labs\OpenAL"]
 
 
-def _legacy_openal_install(ctx: InstallContext) -> bool:
+def _openal_has_legacy_key() -> bool:
+    return checks.any_reg_key_exists("HKLM", _OPENAL_LEGACY_REG_PATHS)
+
+
+def _openal_dll_is_soft() -> Optional[str]:
+    """Returns OpenAL Soft's ProductVersion if BOTH OpenAL32.dll copies are
+    verifiably its build (matched via the PE version resource, not just
+    filename/existence — a same-named reference DLL from something else
+    entirely, e.g. an NVIDIA driver bundle, would otherwise read as
+    "installed" despite not being Soft at all). None if either isn't."""
+    versions = []
+    for dll_path in _OPENAL_DLL_PATHS:
+        if not dll_path.is_file():
+            return None
+        product = checks.dll_version_field(str(dll_path), "ProductName")
+        if not product or "openal soft" not in product.lower():
+            return None
+        versions.append(checks.dll_version_field(str(dll_path), "ProductVersion"))
+    return versions[0] if versions else None
+
+
+def _openal_is_installed() -> InstalledState:
+    has_key = _openal_has_legacy_key()
+    soft_version = _openal_dll_is_soft()
+    return InstalledState(installed=bool(has_key and soft_version), version=soft_version)
+
+
+def _openal_install_legacy_step(ctx: InstallContext) -> bool:
     log = get_logger()
-    zip_path = download("https://openal.org/downloads/oalinst.zip", ctx.temp_dir, "oalinst.zip", "Legacy OpenAL", ctx.dry_run)
+    zip_path = download("https://openal.org/downloads/oalinst.zip", ctx.temp_dir, "oalinst.zip", "OpenAL (Legacy compat)", ctx.dry_run)
     if not zip_path:
         return False
     if ctx.dry_run:
@@ -250,27 +285,14 @@ def _legacy_openal_install(ctx: InstallContext) -> bool:
     if not exe.is_file():
         log.fail("oalinst.exe not found")
         return False
-    return run_exe(exe, ["/S"], "Legacy OpenAL", ctx.dry_run)
+    return run_exe(exe, ["/S"], "OpenAL (Legacy compat)", ctx.dry_run)
 
 
-# ---------------------------------------------------------------------------
-# OPENAL SOFT
-# ---------------------------------------------------------------------------
-
-def _openal_soft_paths() -> tuple[Path, Path]:
-    return SYSTEM_ROOT / "System32" / "OpenAL32.dll", SYSTEM_ROOT / "SysWOW64" / "OpenAL32.dll"
-
-
-def _openal_soft_is_installed() -> InstalledState:
-    dll64, dll32 = _openal_soft_paths()
-    return InstalledState(installed=dll64.is_file() and dll32.is_file())
-
-
-def _openal_soft_install(ctx: InstallContext) -> bool:
+def _openal_install_soft_step(ctx: InstallContext) -> bool:
     log = get_logger()
     zip_path = download(
         "https://openal-soft.org/openal-binaries/openal-soft-1.25.1-bin.zip",
-        ctx.temp_dir, "openal-soft-latest-bin.zip", "OpenAL Soft", ctx.dry_run,
+        ctx.temp_dir, "openal-soft-latest-bin.zip", "OpenAL (Soft runtime)", ctx.dry_run,
     )
     if not zip_path:
         return False
@@ -290,7 +312,7 @@ def _openal_soft_install(ctx: InstallContext) -> bool:
         log.fail("soft_oal.dll not found in expected paths")
         return False
 
-    dest64, dest32 = _openal_soft_paths()
+    dest64, dest32 = _OPENAL_DLL_PATHS
     try:
         shutil.copyfile(dll64, dest64)
         shutil.copyfile(dll32, dest32)
@@ -298,6 +320,19 @@ def _openal_soft_install(ctx: InstallContext) -> bool:
     except OSError as e:
         log.fail(f"Copy failed: {e}")
         return False
+
+
+def _openal_install(ctx: InstallContext) -> bool:
+    """Runs only whichever half is actually missing — e.g. a machine that
+    already has a working Soft DLL from a previous run just gets the
+    registry key planted, not a redundant re-download+copy."""
+    if not _openal_has_legacy_key():
+        if not _openal_install_legacy_step(ctx):
+            return False
+    if not _openal_dll_is_soft():
+        if not _openal_install_soft_step(ctx):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -709,8 +744,7 @@ def build_components() -> List[Component]:
         Component("winget", "winget (Windows Package Manager)", "Core Runtimes", _winget_is_installed, _winget_install),
         Component("netfx35", ".NET Framework 3.5", "Core Runtimes", _netfx35_is_installed, _netfx35_install),
         Component("directx", "DirectX June 2010 (legacy DirectX 9.0c)", "Core Runtimes", _directx_is_installed, _directx_install),
-        Component("openal_legacy", "Legacy OpenAL", "Core Runtimes", _legacy_openal_is_installed, _legacy_openal_install),
-        Component("openal_soft", "OpenAL Soft", "Core Runtimes", _openal_soft_is_installed, _openal_soft_install),
+        Component("openal", "OpenAL (Legacy compat + Soft runtime)", "Core Runtimes", _openal_is_installed, _openal_install),
         Component("vulkan", "Vulkan Runtime", "Core Runtimes", _vulkan_is_installed, _vulkan_install),
         Component("webview2", "Microsoft Edge WebView2 Runtime", "Core Runtimes", _webview2_is_installed, _webview2_install),
     ]

@@ -6,13 +6,23 @@ is_installed() check, same as the PS1 composes Test-Path + Get-ItemProperty
 inline per component.
 """
 
+import ctypes
 import os
 import re
 import shutil
 import subprocess
 import winreg
+from ctypes import wintypes
 from pathlib import Path
 from typing import Optional
+
+_version_dll = ctypes.WinDLL("version.dll")
+_version_dll.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+_version_dll.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+_version_dll.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID]
+_version_dll.GetFileVersionInfoW.restype = wintypes.BOOL
+_version_dll.VerQueryValueW.argtypes = [wintypes.LPCVOID, wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.UINT)]
+_version_dll.VerQueryValueW.restype = wintypes.BOOL
 
 _HIVES = {
     "HKLM": winreg.HKEY_LOCAL_MACHINE,
@@ -174,6 +184,40 @@ def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]
     except OSError:
         pass
     return None
+
+
+def dll_version_field(path: str, field_name: str) -> Optional[str]:
+    """Reads a named string from a PE file's VERSIONINFO resource (e.g.
+    "ProductName", "ProductVersion"). Used to tell apart two DLLs that share
+    a filename but not an identity — e.g. OpenAL Soft's soft_oal.dll
+    (ProductName "OpenAL Soft") copied over OpenAL32.dll versus a generic
+    reference implementation dropped there by something else entirely
+    (confirmed on a real machine: an NVIDIA-bundled OpenAL32.dll reporting
+    ProductName "Standard OpenAL(TM) Library" at that same path)."""
+    size = _version_dll.GetFileVersionInfoSizeW(path, None)
+    if not size:
+        return None
+    buf = ctypes.create_string_buffer(size)
+    if not _version_dll.GetFileVersionInfoW(path, 0, size, buf):
+        return None
+
+    trans_ptr = ctypes.c_void_p()
+    trans_len = wintypes.UINT()
+    if not _version_dll.VerQueryValueW(buf, r"\VarFileInfo\Translation", ctypes.byref(trans_ptr), ctypes.byref(trans_len)):
+        return None
+    if trans_len.value < 4:
+        return None
+    words = ctypes.cast(trans_ptr, ctypes.POINTER(ctypes.c_ushort * (trans_len.value // 2))).contents
+    lang, codepage = words[0], words[1]
+
+    sub_block = f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\{field_name}"
+    value_ptr = ctypes.c_void_p()
+    value_len = wintypes.UINT()
+    if not _version_dll.VerQueryValueW(buf, sub_block, ctypes.byref(value_ptr), ctypes.byref(value_len)):
+        return None
+    if not value_len.value:
+        return None
+    return ctypes.wstring_at(value_ptr, value_len.value - 1)
 
 
 def command_version(exe_path: str, args: list[str]) -> Optional[str]:
