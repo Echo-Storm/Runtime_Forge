@@ -56,8 +56,11 @@ What It Installs / Enables
 Same list as the original, grouped for the tree view:
 
 **Core Runtimes** — winget, .NET Framework 3.5, DirectX June 2010 (full
-legacy DirectX 9.0c via DXSETUP), Legacy OpenAL, OpenAL Soft, Vulkan
-Runtime, Microsoft Edge WebView2 Runtime.
+legacy DirectX 9.0c via DXSETUP), OpenAL (plants the Legacy compatibility
+registry key old installers check for, then overwrites the actual DLL with
+OpenAL Soft's modern implementation — verified by reading the DLL's own
+version resource, not just its filename), Vulkan Runtime, Microsoft Edge
+WebView2 Runtime.
 
 **VC++ Redistributables** — 2005 through 2015–2022, x86 and x64 (12 rows),
 the 2015–2022 pair always resolving to the latest evergreen release.
