@@ -40,9 +40,12 @@ def after_scan():
         results["basic_profile_appears_in_combo"] = window.profile_combo.findText("Basic") > 0
 
         expected_categories = {"Core Runtimes", "VC++ Redistributables", ".NET Runtimes"}
-        expected_keys = {c.key for c in window.components if c.category in expected_categories}
+        expected_keys = {c.key for c in window.components if c.category in expected_categories} | {"python_3.13", "jdk_17"}
         results["basic_profile_has_expected_keys"] = set(seeded[0].component_keys) == expected_keys if seeded else False
         results["basic_profile_excludes_dev_tools"] = not (set(seeded[0].component_keys) & {"git", "node", "cmake", "pwsh", "vscode"}) if seeded else False
+        results["basic_profile_excludes_other_python_java_versions"] = not (
+            set(seeded[0].component_keys) & {"python_3.10", "python_3.11", "python_3.12", "jdk_21", "jdk_8"}
+        ) if seeded else False
 
         # Running MainWindow again (simulating a second launch) must NOT
         # seed a second profile, or silently reset one the user renamed.

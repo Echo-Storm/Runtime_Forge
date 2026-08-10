@@ -18,12 +18,19 @@ from typing import Iterable, List, Optional
 
 # A general "make sure this Windows machine can run old and new software"
 # baseline — broad compatibility/runtime coverage, deliberately excluding
-# role-specific dev tooling (Java, Python, Git, Node, CMake, VS Code,
-# PowerShell). There's no universal answer for which of those any given
-# person wants, but VC++/.NET/DirectX/OpenAL/WebView2 coverage is close to
-# always-useful regardless of what the machine is actually for.
+# role-specific dev tooling (Git, Node, CMake, VS Code, PowerShell). There's
+# no universal answer for which of those any given person wants.
+#
+# Python and Java are the one exception: most people just want *a* runtime
+# of each without picking between versions, so Basic includes exactly one
+# of each rather than zero (all versions stay individually selectable in
+# the tree either way — this only affects what's pre-checked by default).
+# python_3.13 over 3.10: 3.10 reaches end-of-life in October 2026, not a
+# sensible default recommendation baseline. jdk_17 over jdk_21: the
+# longer-established LTS most current tooling has settled on as a baseline.
 DEFAULT_PROFILE_NAME = "Basic"
 _DEFAULT_PROFILE_CATEGORIES = {"Core Runtimes", "VC++ Redistributables", ".NET Runtimes"}
+_DEFAULT_PROFILE_EXTRA_KEYS = {"python_3.13", "jdk_17"}
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]')
 _RESERVED_NAMES = {
@@ -115,8 +122,13 @@ def default_basic_profile(components: Iterable) -> Profile:
     """Built from live Component objects (duck-typed: anything with .key
     and .category), not a static list of key strings — stays correct
     automatically if a component gets renamed or a category's membership
-    changes, instead of silently drifting out of sync with the registry."""
+    changes, instead of silently drifting out of sync with the registry.
+    The extra-keys filter is the same story: if python_3.13 or jdk_17 ever
+    stop existing, this just quietly includes fewer things instead of
+    referencing a dangling key."""
+    live_keys = {c.key for c in components}
     keys = [c.key for c in components if c.category in _DEFAULT_PROFILE_CATEGORIES]
+    keys += [key for key in _DEFAULT_PROFILE_EXTRA_KEYS if key in live_keys]
     return Profile(name=DEFAULT_PROFILE_NAME, component_keys=keys, created=datetime.now().isoformat(timespec="seconds"))
 
 

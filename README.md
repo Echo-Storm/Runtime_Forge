@@ -36,7 +36,11 @@ What's different from the PowerShell version
   fresh backup first, so it's never a one-way door either.
 - **A "Basic" profile ships seeded on first run** — broad compatibility
   coverage (Core Runtimes, all VC++ Redistributables, all .NET Runtimes),
-  deliberately not opinionated about dev tooling (Java/Python/Git/Node/
+  plus one default Python (3.13 — 3.10 reaches end-of-life in October 2026)
+  and one default JDK (17 — the longer-established LTS), since most people
+  just want *a* runtime of each rather than picking a version. Every
+  version still stays individually selectable in the tree regardless.
+  Deliberately not opinionated about the rest of dev tooling (Git/Node/
   CMake/VS Code/PowerShell). Only seeds if you have zero profiles at all —
   never overwrites or fights with anything you've built or renamed.
 - **Fast scans** — version lookups (GitHub/Adoptium/nodejs.org, ~7 of them)
