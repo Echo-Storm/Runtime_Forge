@@ -10,20 +10,12 @@ app_dir = os.path.dirname(os.path.abspath(__file__))
 if app_dir not in sys.path:
     sys.path.insert(0, app_dir)
 
-# Must happen before QApplication is constructed. Qt6 enables its own
-# high-DPI scaling by default, but on Windows the *process* also needs to
-# declare itself DPI-aware (via shcore) so the OS doesn't fall back to
-# blurry bitmap-stretching before Qt's platform plugin gets a chance to set
-# it — a plain `python.exe` process has no manifest declaring this itself.
-if sys.platform == "win32":
-    import ctypes
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-    except (AttributeError, OSError):
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()  # Windows 7/8 fallback
-        except (AttributeError, OSError):
-            pass
+# Qt6's Windows platform plugin already declares per-monitor-v2 DPI
+# awareness itself before the first window is created (unlike Qt5, which
+# needed a manual shcore.SetProcessDpiAwareness() pre-set to avoid blurry
+# bitmap-stretching). Pre-setting it here as well made Windows reject Qt's
+# own later call with "Access is denied" (harmless, but noisy) since a
+# process's DPI awareness can only be set once — so leave it to Qt.
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QGuiApplication, QIcon
