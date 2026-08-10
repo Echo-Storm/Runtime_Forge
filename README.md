@@ -38,10 +38,12 @@ What's different from the PowerShell version
   whether the install directory is actually on PATH and flags it distinctly
   if not, instead of only confirming the software itself is present.
 - **PATH backups** — one automatic snapshot of the machine + user PATH per
-  real install run (not per component), restorable from a dropdown with a
-  before/after preview. A safety net for the rare case a batch of installs
-  (or anything else) leaves PATH in a bad state — restoring itself takes a
-  fresh backup first, so it's never a one-way door either.
+  real install run (not per component), plus one baseline snapshot taken
+  automatically the very first time the app is ever launched, before it's
+  touched anything. A manual "Backup Now" button covers everything in
+  between. All restorable from a dropdown with a before/after preview —
+  restoring itself takes a fresh backup first, so it's never a one-way door
+  either.
 - **A "Basic" profile ships seeded on first run** — broad compatibility
   coverage (Core Runtimes, all VC++ Redistributables, all .NET Runtimes),
   plus one default Python (3.13 — 3.10 reaches end-of-life in October 2026)

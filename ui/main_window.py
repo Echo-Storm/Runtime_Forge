@@ -247,6 +247,7 @@ class MainWindow(QMainWindow):
         self._load_settings()
         self._populate_tree()
         profiles.ensure_default_profile(self.app_dir, self.components)
+        path_backup.ensure_first_run_backup(self.app_dir)
         self._refresh_profile_combo()
         self._refresh_path_backup_combo()
         self._start_scan()

@@ -157,6 +157,19 @@ def restore_backup(backup: PathBackup) -> bool:
     return True
 
 
+def ensure_first_run_backup(app_dir: Path) -> None:
+    """Snapshots PATH once, the very first time this app ever launches -
+    before it has installed or changed anything. Mirrors
+    profiles.ensure_default_profile()'s "only if nothing exists yet" shape:
+    if any backup already exists (from a prior launch, a real install run,
+    or a manual Backup Now click), this does nothing. The point is a known-
+    good baseline from before this app touched the machine at all, since by
+    the time someone notices a problem it's too late to capture that."""
+    if list_backups(app_dir):
+        return
+    create_backup(app_dir, "first launch of AIO Runtime Installer")
+
+
 def add_directory_to_path(dir_path: Path) -> bool:
     """Appends dir_path to the machine PATH if it isn't already there.
 
