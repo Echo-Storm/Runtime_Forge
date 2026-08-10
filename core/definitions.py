@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
+import requests
+
 from core import checks
 from core.downloader import download
 from core.installer_runner import run_exe, run_msi
@@ -819,17 +821,51 @@ def _cmake_install(ctx: InstallContext) -> bool:
 # ---------------------------------------------------------------------------
 
 _VSCODE_EXE = LOCAL_APPDATA / "Programs" / "Microsoft VS Code" / "Code.exe"
+_VSCODE_FALLBACK_VERSION = "1.94.2"
+_VSCODE_FALLBACK_URL = "https://aka.ms/win32-x64-user-stable"
+
+
+def _vscode_resolve_latest() -> LatestInfo:
+    log = get_logger()
+    try:
+        resp = requests.get(
+            "https://update.code.visualstudio.com/api/update/win32-x64-user/stable/latest",
+            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return LatestInfo(version=data["productVersion"], url=data["url"], filename=data["url"].rsplit("/", 1)[-1])
+    except Exception as e:
+        log.status(f"Could not query VS Code update API ({e}); using pinned fallback")
+        return LatestInfo(version=_VSCODE_FALLBACK_VERSION, url=_VSCODE_FALLBACK_URL, filename="VSCodeUserSetup-x64.exe")
 
 
 def _vscode_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.file_exists(str(_VSCODE_EXE)))
+    if not _VSCODE_EXE.is_file():
+        return InstalledState(installed=False)
+    # Reads the version from Code.exe's own PE VERSIONINFO resource rather
+    # than running `Code.exe --version` — confirmed on a real machine that
+    # the raw exe (unlike the `code` CLI shim) does a full Electron app
+    # bootstrap before handling that flag instead of a fast print-and-exit,
+    # visibly launching the app as a side effect of what should be a
+    # read-only presence check.
+    version = checks.dll_version_field(str(_VSCODE_EXE), "ProductVersion")
+    return InstalledState(installed=True, version=version)
+
+
+def _vscode_path_entry() -> Optional[Path]:
+    # The `code` CLI shim lives in bin\ under the install root, one level
+    # below Code.exe itself — that's what VS Code's installer actually adds
+    # to PATH (via its default "addtopath" task), not Code.exe's own folder.
+    return _VSCODE_EXE.parent / "bin"
 
 
 def _vscode_install(ctx: InstallContext) -> bool:
-    file = download("https://aka.ms/win32-x64-user-stable", ctx.temp_dir, "VSCodeSetup-x64.exe", "VS Code", ctx.dry_run, ctx.progress_cb)
+    latest = _vscode_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"VS Code {latest.version}", ctx.dry_run, ctx.progress_cb)
     if not file:
         return False
-    return run_exe(file, ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"], "VS Code", ctx.dry_run)
+    return run_exe(file, ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"], f"VS Code {latest.version}", ctx.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -882,7 +918,7 @@ def build_components() -> List[Component]:
         Component("git", "Git for Windows", "Dev Tools", _git_is_installed, _git_install, _git_resolve_latest, path_entry=_git_path_entry),
         Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest, path_entry=_node_path_entry),
         Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry),
-        Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install),
+        Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install, _vscode_resolve_latest, path_entry=_vscode_path_entry),
     ]
 
     return components
