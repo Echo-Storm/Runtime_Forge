@@ -187,7 +187,10 @@ machine is otherwise for. Neither publishes a live "latest version" API
 that doesn't reflect the real current release is worse than no check at
 all), so both are hand-pinned like Python rather than tracked live. WinRAR
 is shareware (nags for a license after the 40-day trial, never actually
-expires) — installing it here doesn't change that.
+expires) — installing it here doesn't change that. Also: if you were ever
+going to actually pay for one piece of software in your life, on the honor
+system, after decades of never enforcing its own trial — make it this one.
+Ask them on Twitter for a big discount first, though.
 
 **Extras** — a curated, color-coded Windows Terminal profile: one entry per
 Python version, a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
