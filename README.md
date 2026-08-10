@@ -112,6 +112,23 @@ distribute. It's portable: settings (`AIORuntimeInstaller.ini`) and log
 files are written next to the exe, nothing touches the registry except the
 components you choose to install.
 
+Building the Windows installer
+-------------------------------
+The `dist\AIORuntimeInstaller\` folder above is portable but has no Start
+Menu entry and no uninstaller. `installer\AIORuntimeInstaller.iss` (an
+[Inno Setup](https://jrsoftware.org/isinfo.php) script) wraps it into a real
+installer — Program Files install, Start Menu shortcut, uninstaller. Build
+the `dist\` folder first (above), then:
+```
+"<path to>\ISCC.exe" installer\AIORuntimeInstaller.iss
+```
+Output lands in `dist_installer\AIORuntimeInstaller-Setup-<version>.exe`
+(gitignored — the `.iss` script is what's tracked, not the built installer
+binary). The installer requires admin rights, same as the app itself
+already does on every launch via its embedded manifest — this is a
+Start-Menu, run-occasionally desktop app, so deliberately no desktop icon
+task, no auto-start entry, and no tray icon/background service.
+
 Dev tools
 ---------
 - `tools/gen_icon.py` — regenerates `assets/icon.ico`/`icon.png`. Needs

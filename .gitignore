@@ -7,6 +7,7 @@ AIORuntimeInstaller_Log_*.txt
 AIORuntimeInstaller.ini
 build/
 dist/
+dist_installer/
 temp_installers/
 profiles/
 path_backups/
