@@ -318,15 +318,20 @@ def _openal_dll_is_soft() -> Optional[str]:
     return versions[0] if versions else None
 
 
-_OPENAL_SOFT_PINNED_VERSION = "1.25.1"
-_OPENAL_SOFT_URL = f"https://openal-soft.org/openal-binaries/openal-soft-{_OPENAL_SOFT_PINNED_VERSION}-bin.zip"
+_OPENAL_SOFT_PATTERN = re.compile(r"^openal-soft-[\d.]+-bin\.zip$")
+_OPENAL_SOFT_FALLBACK_VERSION = "1.25.1"
+_OPENAL_SOFT_FALLBACK_URL = "https://openal-soft.org/openal-binaries/openal-soft-1.25.1-bin.zip"
 
 
 def _openal_resolve_latest() -> LatestInfo:
-    # No external API — like Python, the Soft build is a hand-pinned
-    # download (not tracked live), so "latest" is just what install()
-    # would actually fetch, same contract as every other resolver here.
-    return LatestInfo(version=_OPENAL_SOFT_PINNED_VERSION, url=_OPENAL_SOFT_URL, filename="openal-soft-latest-bin.zip")
+    # Corrected from an earlier version of this function that just echoed
+    # back a hand-pinned "1.25.1" as both installed target AND "latest" —
+    # comparing our own pinned value against itself can never detect a real
+    # update. Confirmed live: kcat/openal-soft's actual latest release was
+    # 1.25.2, one patch ahead of what was pinned here. Same GitHub-releases
+    # pattern as git-for-windows/CMake/PowerShell — a real external source,
+    # with a pinned fallback only for when the API is unreachable.
+    return get_latest_github_asset("kcat/openal-soft", _OPENAL_SOFT_PATTERN, _OPENAL_SOFT_FALLBACK_URL, _OPENAL_SOFT_FALLBACK_VERSION)
 
 
 def _openal_is_installed() -> InstalledState:
@@ -381,9 +386,10 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
 
 def _openal_install_soft_step(ctx: InstallContext) -> bool:
     log = get_logger()
+    latest = _openal_resolve_latest()
     zip_path = download(
-        _OPENAL_SOFT_URL,
-        ctx.temp_dir, "openal-soft-latest-bin.zip", "OpenAL (Soft runtime)", ctx.dry_run,
+        latest.url,
+        ctx.temp_dir, latest.filename, f"OpenAL Soft {latest.version}", ctx.dry_run,
     )
     if not zip_path:
         return False
