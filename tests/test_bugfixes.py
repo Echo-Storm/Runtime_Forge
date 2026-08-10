@@ -32,7 +32,21 @@ results: dict[str, object] = {}
 def after_scan():
     try:
         # --- Rescan must not silently re-check a manually unchecked item ---
-        a_key = next(iter(window.tree_items))
+        # Must be a component the scan actually auto-checked (missing, or
+        # has an update) - not just the first dict-order key. That was
+        # "winget", which is already-installed-and-current on virtually
+        # every real dev machine, so unchecking-then-reasserting-unchecked
+        # passed trivially without ever exercising the guard this test
+        # claims to verify (it would pass even with the guard deleted).
+        auto_checked = [key for key, item in window.tree_items.items() if item.checkState(0) == Qt.CheckState.Checked]
+        if auto_checked:
+            a_key = auto_checked[0]
+        else:
+            # Every component happened to already be installed/current on
+            # this machine - force one to Checked so the guard is still
+            # genuinely exercised instead of silently no-op'ing.
+            a_key = next(iter(window.tree_items))
+            window.tree_items[a_key].setCheckState(0, Qt.CheckState.Checked)
         window.tree_items[a_key].setCheckState(0, Qt.CheckState.Unchecked)
         window._on_scan_finished()  # simulate a second scan's completion without a real rescan
         for key, (state, latest) in window._scan_results.items():

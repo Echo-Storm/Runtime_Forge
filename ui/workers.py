@@ -48,12 +48,19 @@ class ScanWorker(QThread):
         # between them to contend over — unlike installers (which share
         # Windows Installer's single global lock), there's no correctness
         # risk to running these concurrently, only a speed win.
+        log = get_logger()
         states: dict[str, InstalledState] = {}
         versioned_components = []
         for component in self.components:
             try:
                 state = component.is_installed()
-            except Exception:
+            except Exception as e:
+                # Logged, not just swallowed - a genuine error here (a
+                # permission-denied registry read, a corrupted DLL) would
+                # otherwise look exactly like "legitimately not installed"
+                # in both the log pane and the tree, with no way to tell
+                # the two apart.
+                log.status(f"WARNING: {component.name} presence check raised an exception ({e})")
                 state = InstalledState(installed=False)
             states[component.key] = state
             if component.resolve_latest is None:
@@ -65,7 +72,8 @@ class ScanWorker(QThread):
             def resolve(component):
                 try:
                     return component.key, component.resolve_latest()
-                except Exception:
+                except Exception as e:
+                    log.status(f"WARNING: {component.name} latest-version check raised an exception ({e})")
                     return component.key, None
 
             worker_count = min(MAX_SCAN_WORKERS, len(versioned_components))
@@ -154,22 +162,38 @@ class InstallWorker(QThread):
 
             try:
                 state = component.is_installed()
-            except Exception:
+            except Exception as e:
+                log.status(f"WARNING: {component.name} presence check raised an exception ({e}) - treating as not installed")
                 state = InstalledState(installed=False)
 
             if state.installed:
                 update_available = False
+                update_check_failed = False
                 if component.resolve_latest is not None:
                     try:
                         latest = component.resolve_latest()
                         update_available = latest is not None and version_is_newer(latest.version, state.version or "")
-                    except Exception:
-                        update_available = False
+                    except Exception as e:
+                        # A failed update check must not look identical to a
+                        # confirmed "already current" - otherwise a transient
+                        # network error (or a GitHub rate limit, which this
+                        # app hits routinely) silently leaves an outdated
+                        # component in place with a log line implying
+                        # nothing was wrong.
+                        update_check_failed = True
+                        log.status(f"WARNING: {component.name} update check failed ({e}) - leaving it as-is rather than guessing")
 
                 if not update_available:
-                    log.skip(f"{component.name} already installed")
                     skipped_count += 1
-                    self.component_finished.emit(component.key, ResultStatus.SKIPPED, "")
+                    if update_check_failed:
+                        log.skip(f"{component.name} already installed (update check failed - see warning above)")
+                        self.component_finished.emit(
+                            component.key, ResultStatus.SKIPPED,
+                            "update check failed - could not confirm this is the latest version",
+                        )
+                    else:
+                        log.skip(f"{component.name} already installed")
+                        self.component_finished.emit(component.key, ResultStatus.SKIPPED, "")
                     continue
 
                 log.status(f"{component.name}: update available ({state.version} -> {latest.version}), installing")

@@ -487,7 +487,37 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.install_worker.request_cancel()
-            self.install_worker.wait(5000)
+            if not self.install_worker.wait(5000):
+                # request_cancel() only stops the *next* component from
+                # starting - the current one's blocking subprocess.run()/
+                # msiexec call can't be interrupted from here. Destroying a
+                # still-running QThread (which closing the window would do)
+                # is undefined behavior in Qt - can crash on exit - and
+                # would orphan whatever installer subprocess is mid-flight,
+                # so block for real completion instead of proceeding after
+                # an arbitrary timeout.
+                QMessageBox.information(
+                    self, "Finishing Up",
+                    "The current component can't be interrupted mid-install - "
+                    "waiting for it to finish before closing (nothing new will start).",
+                )
+                self.install_worker.wait()
+        if self.scan_worker and self.scan_worker.isRunning():
+            reply = QMessageBox.question(
+                self, "Scan in Progress", "A scan is still running. Quit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            # ScanWorker has no cancellation mechanism (it's read-only
+            # network calls) - same crash risk as above if the window closes
+            # out from under it, so wait for real completion here too.
+            if not self.scan_worker.wait(5000):
+                QMessageBox.information(
+                    self, "Finishing Up", "Waiting for the current scan to finish before closing.",
+                )
+                self.scan_worker.wait()
         event.accept()
 
     # ------------------------------------------------------------------
@@ -542,6 +572,7 @@ class MainWindow(QMainWindow):
             item.setCheckState(0, Qt.CheckState.Checked)
 
     def _on_scan_finished(self):
+        self.scan_worker = None
         self._initial_scan_done = True
         self.rescan_btn.setEnabled(True)
         self.install_btn.setEnabled(True)
@@ -672,6 +703,19 @@ class MainWindow(QMainWindow):
         name = name.strip()
         if not ok or not name:
             return
+        # Case-insensitive: profile names become filenames, and Windows
+        # filenames are case-insensitive - "basic" and "Basic" are the same
+        # file on disk, so a naive case-sensitive check here would miss a
+        # collision that save_profile() below would silently clobber anyway.
+        existing = next((p for p in self._profiles_cache if p.name.lower() == name.lower()), None)
+        if existing is not None:
+            reply = QMessageBox.question(
+                self, "Overwrite Profile",
+                f"A profile named '{existing.name}' already exists. Overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         self._write_profile(name)
 
     def _on_update_profile(self):
@@ -751,7 +795,19 @@ class MainWindow(QMainWindow):
     # PATH backups
     # ------------------------------------------------------------------
 
-    def _refresh_path_backup_combo(self):
+    def _refresh_path_backup_combo(self, select_timestamp: Optional[str] = None):
+        """Repopulates the PATH-backup dropdown. By default, re-selects
+        whichever backup was already selected (by timestamp identity)
+        rather than resetting to the newest entry - otherwise an unrelated
+        action elsewhere (an install run finishing, which creates its own
+        new backup) would silently swap out a backup the user had
+        deliberately selected to review or restore. Pass select_timestamp
+        to select a specific entry instead (e.g. one just created by
+        Backup Now)."""
+        if select_timestamp is None:
+            current = self._selected_path_backup()
+            select_timestamp = current.timestamp if current else None
+
         self.path_backup_combo.clear()
         self._path_backups_cache = path_backup.list_backups(self.app_dir)
         if not self._path_backups_cache:
@@ -762,10 +818,24 @@ class MainWindow(QMainWindow):
             self.path_backup_combo.addItem(f"{backup.timestamp} — {backup.reason}")
         self.path_backup_restore_btn.setEnabled(True)
 
+        if select_timestamp is not None:
+            for i, backup in enumerate(self._path_backups_cache):
+                if backup.timestamp == select_timestamp:
+                    self.path_backup_combo.setCurrentIndex(i)
+                    break
+
+    def _selected_path_backup(self) -> Optional[path_backup.PathBackup]:
+        idx = self.path_backup_combo.currentIndex()
+        if 0 <= idx < len(self._path_backups_cache):
+            return self._path_backups_cache[idx]
+        return None
+
     def _on_backup_path_now(self):
         backup_path = path_backup.create_backup(self.app_dir, "manual backup")
-        self._refresh_path_backup_combo()
         if backup_path:
+            new_backups = path_backup.list_backups(self.app_dir)
+            new_timestamp = new_backups[0].timestamp if new_backups else None
+            self._refresh_path_backup_combo(select_timestamp=new_timestamp)
             QMessageBox.information(
                 self, "PATH Backed Up",
                 f"Current machine + user PATH saved to {backup_path.name}.",
@@ -777,10 +847,9 @@ class MainWindow(QMainWindow):
             )
 
     def _on_restore_path_backup(self):
-        idx = self.path_backup_combo.currentIndex()
-        if idx < 0 or idx >= len(self._path_backups_cache):
+        backup = self._selected_path_backup()
+        if backup is None:
             return
-        backup = self._path_backups_cache[idx]
 
         current_machine, current_user = path_backup.read_current_path()
 
@@ -803,8 +872,12 @@ class MainWindow(QMainWindow):
             return
 
         path_backup.create_backup(self.app_dir, f"before restoring {backup.timestamp}")
+        # Refresh regardless of outcome below - the safety backup above was
+        # just written to disk either way, and leaving the combo stale
+        # would contradict the dialog's own claim that it "is taken
+        # automatically first" if the user then goes looking for it.
+        self._refresh_path_backup_combo(select_timestamp=backup.timestamp)
         if path_backup.restore_backup(backup):
-            self._refresh_path_backup_combo()
             QMessageBox.information(
                 self, "PATH Restored",
                 "PATH has been restored and the change broadcast to running processes.\n"

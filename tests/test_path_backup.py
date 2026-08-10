@@ -91,14 +91,18 @@ def after_scan():
         results["ui_combo_populated"] = window.path_backup_combo.count() == len(backups)
         results["ui_restore_btn_enabled_when_backups_exist"] = window.path_backup_restore_btn.isEnabled()
 
-        # Clean up the test backups this test created (leave the directory as
-        # it was found, same discipline as the other test files).
-        for f in path_backup.backups_dir(app_dir).glob("path_backup_*.json"):
-            f.unlink(missing_ok=True)
-
     except Exception as e:
         import traceback
         results["EXCEPTION"] = f"{e}\n{traceback.format_exc()}"
+
+    finally:
+        # Clean up the test backups this test created (leave the directory
+        # as it was found, same discipline as the other test files) - in a
+        # finally so a failed assertion above (e.g. unexpected backups[0]
+        # indexing) can't leave test-created entries in the real backup
+        # store this app itself reads from.
+        for f in path_backup.backups_dir(app_dir).glob("path_backup_*.json"):
+            f.unlink(missing_ok=True)
 
     for k, v in results.items():
         print(f"{k}: {v}")

@@ -99,5 +99,16 @@ def run_test():
     app.exit(0 if all_ok else 1)
 
 
-QTimer.singleShot(3000, run_test)
+def wait_for_scan():
+    # Polls actual scan completion instead of a flat delay - the scan makes
+    # live GitHub/Adoptium/nodejs.org calls, so a fixed timer can fire while
+    # ScanWorker is still running, letting this test's manual checkbox
+    # edits race its in-flight auto-select signal handling.
+    if window.scan_worker is not None and window.scan_worker.isRunning():
+        QTimer.singleShot(300, wait_for_scan)
+    else:
+        run_test()
+
+
+QTimer.singleShot(500, wait_for_scan)
 sys.exit(app.exec())
