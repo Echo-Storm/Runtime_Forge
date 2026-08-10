@@ -1266,7 +1266,16 @@ def _ninja_path_entry() -> Optional[Path]:
 def _ninja_install(ctx: InstallContext) -> bool:
     log = get_logger()
     latest = _ninja_resolve_latest()
-    zip_path = download(latest.url, ctx.temp_dir, latest.filename, f"ninja {latest.version}", ctx.dry_run, ctx.progress_cb)
+    # The real GitHub asset name ("ninja-win.zip") never changes between
+    # releases, unlike almost every other component's filename here — so the
+    # download cache's filename+size check alone can't tell a stale
+    # temp_installers/ leftover (from a crashed/killed prior run - that
+    # directory is only cleaned up at the end of a *completed* run) apart
+    # from the version actually just resolved as latest. Tagging the cache
+    # filename with the resolved version forces a cache miss on any real
+    # version change.
+    cache_filename = f"ninja-{latest.version}-win.zip"
+    zip_path = download(latest.url, ctx.temp_dir, cache_filename, f"ninja {latest.version}", ctx.dry_run, ctx.progress_cb)
     if not zip_path:
         return False
     if ctx.dry_run:
@@ -1351,7 +1360,12 @@ def _jq_path_entry() -> Optional[Path]:
 def _jq_install(ctx: InstallContext) -> bool:
     log = get_logger()
     latest = _jq_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, "jq-download.exe", f"jq {latest.version}", ctx.dry_run, ctx.progress_cb)
+    # Same reasoning as ninja above: this filename was previously a fixed
+    # "jq-download.exe" regardless of version, so a stale cached file left
+    # behind by a crashed/killed prior run would be silently trusted as the
+    # newly-resolved version. Tagging it with the resolved version forces a
+    # cache miss on any real version change.
+    file = download(latest.url, ctx.temp_dir, f"jq-{latest.version}-download.exe", f"jq {latest.version}", ctx.dry_run, ctx.progress_cb)
     if not file:
         return False
     if ctx.dry_run:
