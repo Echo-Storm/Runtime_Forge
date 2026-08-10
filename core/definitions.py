@@ -556,6 +556,34 @@ def _net_is_installed(nd: _NetDef) -> InstalledState:
     return InstalledState(installed=installed, version=nd.ver if installed else None)
 
 
+_NET_RELEASES_INDEX_URL = "https://builds.dotnet.microsoft.com/dotnet/release-metadata/releases-index.json"
+# Verified live against the real API before use — "latest-runtime" per
+# channel-version is directly comparable to what _net_is_installed() reads
+# off disk (both "major.minor.patch"), no format translation needed.
+_NET_FALLBACK_VERSIONS = {"8.0": "8.0.29", "9.0": "9.0.18", "10.0": "10.0.10"}
+
+
+def _net_resolve_latest(nd: _NetDef) -> Optional[LatestInfo]:
+    # .NET Framework 4.8.1 has no comparable "latest version" here — it's
+    # serviced through Windows Update as an OS component with its own
+    # opaque Release-code numbering, not a separately versioned
+    # redistributable release cadence like 8/9/10.
+    if nd.is_framework or nd.ver not in _NET_FALLBACK_VERSIONS:
+        return None
+    log = get_logger()
+    version = _NET_FALLBACK_VERSIONS[nd.ver]
+    try:
+        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp.raise_for_status()
+        for channel in resp.json().get("releases-index", []):
+            if channel.get("channel-version") == nd.ver:
+                version = channel.get("latest-runtime", version)
+                break
+    except Exception as e:
+        log.status(f"Could not query .NET releases index for {nd.ver} ({e}); using pinned fallback")
+    return LatestInfo(version=version, url=nd.url, filename=nd.file)
+
+
 def _net_install(nd: _NetDef, ctx: InstallContext) -> bool:
     file = download(nd.url, ctx.temp_dir, nd.file, nd.name, ctx.dry_run, ctx.progress_cb)
     if not file:
@@ -728,15 +756,16 @@ def _pwsh_install(ctx: InstallContext) -> bool:
 
 @dataclass
 class _PyDef:
-    ver: str
+    ver: str            # "3.13" - used for the install dir name (Python313)
+    full_version: str    # "3.13.14" - the exact pinned patch this installs
     url: str
 
 
 _PY_DEFS = [
-    _PyDef("3.10", "https://www.python.org/ftp/python/3.10.20/python-3.10.20-amd64.exe"),
-    _PyDef("3.11", "https://www.python.org/ftp/python/3.11.15/python-3.11.15-amd64.exe"),
-    _PyDef("3.12", "https://www.python.org/ftp/python/3.12.13/python-3.12.13-amd64.exe"),
-    _PyDef("3.13", "https://www.python.org/ftp/python/3.13.14/python-3.13.14-amd64.exe"),
+    _PyDef("3.10", "3.10.20", "https://www.python.org/ftp/python/3.10.20/python-3.10.20-amd64.exe"),
+    _PyDef("3.11", "3.11.15", "https://www.python.org/ftp/python/3.11.15/python-3.11.15-amd64.exe"),
+    _PyDef("3.12", "3.12.13", "https://www.python.org/ftp/python/3.12.13/python-3.12.13-amd64.exe"),
+    _PyDef("3.13", "3.13.14", "https://www.python.org/ftp/python/3.13.14/python-3.13.14-amd64.exe"),
 ]
 
 
@@ -748,9 +777,31 @@ def _py_path_entry(py: _PyDef) -> Optional[Path]:
     return _py_dir(py)
 
 
+def _py_exe(py: _PyDef) -> Path:
+    return _py_dir(py) / "python.exe"
+
+
 def _py_is_installed(py: _PyDef) -> InstalledState:
-    installed = checks.file_exists(str(_py_dir(py) / "python.exe"))
-    return InstalledState(installed=installed, version=py.ver if installed else None)
+    exe = _py_exe(py)
+    if not exe.is_file():
+        return InstalledState(installed=False)
+    # Reads the exe's own PE VERSIONINFO for the real installed patch
+    # (e.g. "3.13.13") rather than just reporting the coarse "3.13" minor
+    # version — found a real gap this way: on a real machine, the installed
+    # patches (3.13.13, 3.11.9) were actually behind what this app's own
+    # pinned targets install (3.13.14, 3.11.15), invisible until compared
+    # at the patch level.
+    version = checks.dll_version_field(str(exe), "ProductVersion") or py.ver
+    return InstalledState(installed=True, version=version)
+
+
+def _py_resolve_latest(py: _PyDef) -> LatestInfo:
+    # No external API call — python.org doesn't publish a simple per-minor-
+    # series "latest patch" endpoint, and these versions are deliberately
+    # pinned/refreshed by hand rather than tracked live (same as the PS1
+    # original). "Latest" here just means "what this app would actually
+    # install," matching every other resolver's contract in this file.
+    return LatestInfo(version=py.full_version, url=py.url, filename=f"python-{py.full_version}-amd64.exe")
 
 
 def _py_install(py: _PyDef, ctx: InstallContext) -> bool:
@@ -949,6 +1000,7 @@ def build_components() -> List[Component]:
             f"net_{nd.name}", nd.name, ".NET Runtimes",
             lambda nd=nd: _net_is_installed(nd),
             lambda ctx, nd=nd: _net_install(nd, ctx),
+            lambda nd=nd: _net_resolve_latest(nd),
         ))
 
     for jd in _JDK_DEFS:
@@ -965,6 +1017,7 @@ def build_components() -> List[Component]:
             f"python_{py.ver}", f"Python {py.ver}", "Python",
             lambda py=py: _py_is_installed(py),
             lambda ctx, py=py: _py_install(py, ctx),
+            lambda py=py: _py_resolve_latest(py),
             path_entry=lambda py=py: _py_path_entry(py),
         ))
 
