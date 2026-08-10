@@ -1,3 +1,8 @@
+# Normalize text files to LF in the repo, checked out as CRLF on Windows -
+# stops every commit from re-triggering "LF will be replaced by CRLF"
+# warnings for files git already has committed with mixed endings.
+* text=auto
+
 # windows_terminal_settings.json is compared byte-for-byte (SHA256) against
 # the live Windows Terminal settings.json at runtime to decide "installed"
 # vs "not installed" — git's default autocrlf on Windows would silently
