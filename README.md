@@ -13,7 +13,15 @@ What's different from the PowerShell version
 ----------------------------------------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
-  release exists, what's available) instead of a plain yes/no.
+  release exists, what's available) instead of a plain yes/no. Every one of
+  the 37 components reports its real installed version, not just presence;
+  22 have genuine update detection against a real source (a live API, or
+  this app's own pinned install target). The rest — DirectX, .NET Framework
+  4.8.1, WebView2, and pre-2015 VC++ redists — have no meaningful "latest
+  version" to compare against at all (verified, not just not gotten to:
+  DirectX's June 2010 redistributable is genuinely the final one Microsoft
+  ever shipped, WebView2 self-updates in the background regardless of this
+  app, etc).
 - **Pick exactly what you want** — every VC++ redist year/arch, every .NET
   runtime piece, every JDK, every Python version, and every dev tool is its
   own checkbox, not an all-or-nothing run.

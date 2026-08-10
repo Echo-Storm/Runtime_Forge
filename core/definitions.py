@@ -318,6 +318,17 @@ def _openal_dll_is_soft() -> Optional[str]:
     return versions[0] if versions else None
 
 
+_OPENAL_SOFT_PINNED_VERSION = "1.25.1"
+_OPENAL_SOFT_URL = f"https://openal-soft.org/openal-binaries/openal-soft-{_OPENAL_SOFT_PINNED_VERSION}-bin.zip"
+
+
+def _openal_resolve_latest() -> LatestInfo:
+    # No external API — like Python, the Soft build is a hand-pinned
+    # download (not tracked live), so "latest" is just what install()
+    # would actually fetch, same contract as every other resolver here.
+    return LatestInfo(version=_OPENAL_SOFT_PINNED_VERSION, url=_OPENAL_SOFT_URL, filename="openal-soft-latest-bin.zip")
+
+
 def _openal_is_installed() -> InstalledState:
     has_key = _openal_has_legacy_key()
     soft_version = _openal_dll_is_soft()
@@ -371,7 +382,7 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
 def _openal_install_soft_step(ctx: InstallContext) -> bool:
     log = get_logger()
     zip_path = download(
-        "https://openal-soft.org/openal-binaries/openal-soft-1.25.1-bin.zip",
+        _OPENAL_SOFT_URL,
         ctx.temp_dir, "openal-soft-latest-bin.zip", "OpenAL (Soft runtime)", ctx.dry_run,
     )
     if not zip_path:
@@ -983,7 +994,7 @@ def build_components() -> List[Component]:
         Component("winget", "winget (Windows Package Manager)", "Core Runtimes", _winget_is_installed, _winget_install, _winget_resolve_latest),
         Component("netfx35", ".NET Framework 3.5", "Core Runtimes", _netfx35_is_installed, _netfx35_install),
         Component("directx", "DirectX June 2010 (legacy DirectX 9.0c)", "Core Runtimes", _directx_is_installed, _directx_install),
-        Component("openal", "OpenAL (Legacy compat + Soft runtime)", "Core Runtimes", _openal_is_installed, _openal_install),
+        Component("openal", "OpenAL (Legacy compat + Soft runtime)", "Core Runtimes", _openal_is_installed, _openal_install, _openal_resolve_latest),
         Component("vulkan", "Vulkan Runtime", "Core Runtimes", _vulkan_is_installed, _vulkan_install, _vulkan_resolve_latest),
         Component("webview2", "Microsoft Edge WebView2 Runtime", "Core Runtimes", _webview2_is_installed, _webview2_install),
     ]
