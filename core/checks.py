@@ -81,14 +81,24 @@ def refresh_path_env() -> None:
     """Re-reads PATH from HKLM+HKCU into this process's environment.
     Needed after installers (e.g. winget) modify PATH — a running process
     otherwise never sees the change, same problem the PS1 patches around
-    after the winget install step."""
+    after the winget install step.
+
+    Registry PATH entries can be REG_EXPAND_SZ containing literal %VAR%
+    placeholders (confirmed on a real machine: dotnet's own installer
+    writes "%USERPROFILE%\\.dotnet\\tools" verbatim) — winreg.QueryValueEx
+    never expands these, so os.path.expandvars() has to run before the
+    result is trusted as a real, walkable PATH. Skipping this would leave
+    a literal "%USERPROFILE%\\..." entry in os.environ["Path"] that no
+    lookup (shutil.which, subprocess's own search) will ever match against
+    a real directory.
+    """
     machine = reg_value(
         "HKLM", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "Path"
     ) or ""
     user = reg_value("HKCU", "Environment", "Path") or ""
     combined = ";".join(p for p in (machine, user) if p)
     if combined:
-        os.environ["Path"] = combined
+        os.environ["Path"] = os.path.expandvars(combined)
 
 
 def command_on_path(name: str) -> Optional[str]:
