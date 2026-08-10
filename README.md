@@ -1,20 +1,40 @@
+<p align="center"><img src="assets/banner.png" alt="AIO Runtime Installer Banner"></p>
+
 AIO Runtime Installer
 ======================
 
-A Qt6 (PyQt6) desktop GUI for the same install list as the original AIO
-Runtime & Dev Tool Installer PowerShell script — one-click install of the
-legacy and modern runtimes, libraries, and dev tools needed for old games,
-modern apps, and build environments on Windows 11 — with a real interface
-on top instead of a console.
+<p align="center">
+<img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2011-0078D6">
+<img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
+<img alt="PyQt6" src="https://img.shields.io/badge/UI-PyQt6-41CD52">
+<img alt="License" src="https://img.shields.io/badge/license-MIT-informational">
+</p>
+
+A Qt6 (PyQt6) desktop GUI for the same install list as the original [AIO
+Runtime & Dev Tool Installer](https://github.com/Echo-Storm/2026-AIO-Runtime-Dev-Tool-Installer)
+PowerShell script — one-click install of the legacy and modern runtimes,
+libraries, and dev tools needed for old games, modern apps, and build
+environments on Windows 11 — with a real interface on top instead of a
+console.
+
+I write stuff when I get annoyed that something I need doesn't exist. The
+PowerShell version scratched that itch for years; this is the same idea with
+an actual UI on top — see what's already on the machine before touching
+anything, pick exactly what you want, and never wonder what a `-DryRun`
+would have done.
 
 Author: XechostormX
+
+Screenshot
+----------
+<p align="center"><img src="assets/screenshot.png" alt="AIO Runtime Installer main window — a scan in progress showing installed/outdated/missing components across .NET SDK, Java, and Python"></p>
 
 What's different from the PowerShell version
 ----------------------------------------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
   release exists, what's available) instead of a plain yes/no. Every one of
-  the 46 components reports its real installed version, not just presence;
+  the 47 components reports its real installed version, not just presence;
   31 have genuine update detection against a real source (a live API, or
   this app's own pinned install target). The rest — DirectX, .NET Framework
   4.8.1, WebView2, and pre-2015 VC++ redists — have no meaningful "latest
