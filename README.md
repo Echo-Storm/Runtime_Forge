@@ -27,7 +27,7 @@ Author: XechostormX
 
 Screenshot
 ----------
-<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a scan in progress showing installed/outdated/missing components across .NET SDK, Java, and Python"></p>
+<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — grouped Selection, Profiles, and PATH Backups panels above a completed scan of the Core Runtimes"></p>
 
 What's different from the PowerShell version
 ----------------------------------------------

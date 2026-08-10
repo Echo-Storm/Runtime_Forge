@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QCheckBox,
     QProgressBar, QMessageBox, QHeaderView, QFrame, QStatusBar,
     QTextEdit, QSizePolicy, QAbstractItemView, QComboBox, QInputDialog,
@@ -33,10 +33,43 @@ QMainWindow, QWidget {
     font-size: 10pt;
 }
 
+QDialog, QMessageBox, QInputDialog {
+    background-color: #1a1d21;
+    color: #c0c4c9;
+}
+
+QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel {
+    color: #c0c4c9;
+}
+
 QLabel#titleLabel {
     color: #5b9bd5;
-    font-size: 11pt;
+    font-size: 15pt;
     font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QFrame#titleRule {
+    background-color: #5b9bd5;
+    max-height: 2px;
+    border: none;
+}
+
+QFrame#sectionPanel {
+    background-color: #1e2226;
+    border: 1px solid #2a2e33;
+    border-radius: 6px;
+}
+
+QLabel#sectionLabel {
+    color: #5b9bd5;
+    font-weight: bold;
+    font-size: 8pt;
+    letter-spacing: 1px;
+}
+
+QLabel#fieldLabel {
+    color: #8a8f96;
 }
 
 QLabel#warnLabel {
@@ -116,6 +149,49 @@ QTreeWidget::item:selected {
     background-color: #2a4a70;
 }
 
+QTreeWidget::item:hover {
+    background-color: #262b31;
+}
+
+QComboBox {
+    background-color: #262b31;
+    border: 1px solid #3d444c;
+    border-radius: 3px;
+    padding: 5px 10px;
+    color: #c0c4c9;
+    min-height: 20px;
+}
+
+QComboBox:hover, QComboBox:focus {
+    border-color: #5b9bd5;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #262b31;
+    border: 1px solid #3d444c;
+    selection-background-color: #2a4a70;
+    color: #c0c4c9;
+    outline: none;
+}
+
+QLineEdit {
+    background-color: #202327;
+    border: 1px solid #3d444c;
+    border-radius: 3px;
+    padding: 5px 8px;
+    color: #c0c4c9;
+    min-height: 20px;
+}
+
+QLineEdit:focus {
+    border-color: #5b9bd5;
+}
+
 QHeaderView::section {
     background-color: #262b31;
     color: #5b9bd5;
@@ -164,6 +240,19 @@ QCheckBox::indicator {
 QCheckBox::indicator:checked {
     background-color: #5b9bd5;
     border-color: #5b9bd5;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #5b9bd5;
+}
+
+QCheckBox:disabled {
+    color: #5a5f66;
+}
+
+QCheckBox::indicator:disabled {
+    background-color: #16181b;
+    border-color: #2c3036;
 }
 
 QStatusBar {
@@ -244,7 +333,12 @@ class MainWindow(QMainWindow):
         settings_path = str(self.app_dir / "RuntimeForge.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
 
-        self.setStyleSheet(STYLE_SHEET)
+        # Applied at the QApplication level, not just this window - a
+        # QMessageBox/QInputDialog is a separate top-level window that does
+        # NOT inherit a stylesheet set only on MainWindow, so confirmation
+        # dialogs (profile overwrite, PATH restore, etc.) would otherwise
+        # render in plain unthemed Windows chrome against this dark UI.
+        QApplication.instance().setStyleSheet(STYLE_SHEET)
         self._setup_ui()
         self._load_settings()
         self._populate_tree()
@@ -258,18 +352,39 @@ class MainWindow(QMainWindow):
     # UI construction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _make_section(title: str, content: QHBoxLayout) -> QFrame:
+        """Wraps a row of controls in a bordered, labeled panel so related
+        controls (bulk-select, profiles, PATH backups) read as distinct
+        sections instead of a flat stack of same-weight rows."""
+        frame = QFrame()
+        frame.setObjectName("sectionPanel")
+        inner = QVBoxLayout(frame)
+        inner.setContentsMargins(12, 10, 12, 10)
+        inner.setSpacing(8)
+        label = QLabel(title)
+        label.setObjectName("sectionLabel")
+        inner.addWidget(label)
+        inner.addLayout(content)
+        return frame
+
     def _setup_ui(self):
         self.setWindowTitle(f"{self.APP_NAME} v{self.APP_VERSION}")
 
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
 
         title = QLabel("RUNTIME FORGE")
         title.setObjectName("titleLabel")
         layout.addWidget(title)
+
+        title_rule = QFrame()
+        title_rule.setObjectName("titleRule")
+        title_rule.setFixedHeight(2)
+        layout.addWidget(title_rule)
 
         if not _is_admin():
             warn = QLabel(
@@ -282,7 +397,7 @@ class MainWindow(QMainWindow):
 
         # --- Toolbar ---
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar.setSpacing(10)
 
         self.select_all_btn = QPushButton("Select All")
         self.select_all_btn.clicked.connect(self._on_select_all)
@@ -307,13 +422,15 @@ class MainWindow(QMainWindow):
         self.dry_run_checkbox.setToolTip("Preview every action (including what it would download) without installing or writing anything")
         toolbar.addWidget(self.dry_run_checkbox)
 
-        layout.addLayout(toolbar)
+        layout.addWidget(self._make_section("SELECTION", toolbar))
 
         # --- Profiles ---
         profile_bar = QHBoxLayout()
-        profile_bar.setSpacing(8)
+        profile_bar.setSpacing(10)
 
-        profile_bar.addWidget(QLabel("Profile:"))
+        profile_field_label = QLabel("Active:")
+        profile_field_label.setObjectName("fieldLabel")
+        profile_bar.addWidget(profile_field_label)
 
         self.profile_combo = QComboBox()
         self.profile_combo.setMinimumWidth(220)
@@ -347,13 +464,15 @@ class MainWindow(QMainWindow):
         self.profile_import_btn.clicked.connect(self._on_import_profile)
         profile_bar.addWidget(self.profile_import_btn)
 
-        layout.addLayout(profile_bar)
+        layout.addWidget(self._make_section("PROFILES", profile_bar))
 
         # --- PATH Backups ---
         path_bar = QHBoxLayout()
-        path_bar.setSpacing(8)
+        path_bar.setSpacing(10)
 
-        path_bar.addWidget(QLabel("PATH Backups:"))
+        path_field_label = QLabel("Snapshot:")
+        path_field_label.setObjectName("fieldLabel")
+        path_bar.addWidget(path_field_label)
 
         self.path_backup_combo = QComboBox()
         self.path_backup_combo.setMinimumWidth(320)
@@ -378,7 +497,7 @@ class MainWindow(QMainWindow):
 
         path_bar.addStretch()
 
-        layout.addLayout(path_bar)
+        layout.addWidget(self._make_section("PATH BACKUPS", path_bar))
 
         # --- Tree ---
         self.tree = QTreeWidget()
@@ -457,7 +576,11 @@ class MainWindow(QMainWindow):
         kofi_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
         self.status_bar.addPermanentWidget(kofi_btn)
 
-        self.resize(980, 720)
+        # A bit taller than before - the three grouped panels above the
+        # tree (SELECTION/PROFILES/PATH BACKUPS) take more vertical space
+        # than the old flat rows did, and the tree shouldn't shrink to
+        # compensate on a fresh first launch.
+        self.resize(1000, 800)
 
     def _populate_tree(self):
         categories: dict[str, QTreeWidgetItem] = {}
@@ -818,6 +941,17 @@ class MainWindow(QMainWindow):
     # PATH backups
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _format_backup_timestamp(iso_str: str) -> str:
+        """Backups are identified internally by their raw ISO timestamp
+        string (used for cache-selection matching, filenames, etc) - this
+        is purely a display-layer formatter for the combo/dialog text, not
+        a change to that identity."""
+        try:
+            return datetime.fromisoformat(iso_str).strftime("%b %d, %Y · %I:%M %p")
+        except ValueError:
+            return iso_str
+
     def _refresh_path_backup_combo(self, select_timestamp: Optional[str] = None):
         """Repopulates the PATH-backup dropdown. By default, re-selects
         whichever backup was already selected (by timestamp identity)
@@ -838,7 +972,7 @@ class MainWindow(QMainWindow):
             self.path_backup_restore_btn.setEnabled(False)
             return
         for backup in self._path_backups_cache:
-            self.path_backup_combo.addItem(f"{backup.timestamp} — {backup.reason}")
+            self.path_backup_combo.addItem(f"{self._format_backup_timestamp(backup.timestamp)} — {backup.reason}")
         self.path_backup_restore_btn.setEnabled(True)
 
         if select_timestamp is not None:
@@ -877,7 +1011,7 @@ class MainWindow(QMainWindow):
         current_machine, current_user = path_backup.read_current_path()
 
         preview = (
-            f"Restore PATH to the snapshot from {backup.timestamp}?\n"
+            f"Restore PATH to the snapshot from {self._format_backup_timestamp(backup.timestamp)}?\n"
             f"({backup.reason})\n\n"
             f"This will overwrite the CURRENT machine + user PATH values.\n"
             f"A fresh backup of the current PATH is taken automatically first, "
