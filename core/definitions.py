@@ -165,8 +165,14 @@ def _add_appx_package(path: Path) -> bool:
 
 
 def _winget_install(ctx: InstallContext) -> bool:
+    # Uses whatever resolve_latest() actually resolved, not a separately
+    # hardcoded URL — the same class of bug already found and fixed once
+    # this session for OpenAL (two independently-resolved sources that can
+    # silently disagree, so "Latest Version" in the UI wasn't necessarily
+    # what actually got installed).
     log = get_logger()
-    file = download("https://aka.ms/getwinget", ctx.temp_dir, "Microsoft.DesktopAppInstaller.msixbundle", "winget", ctx.dry_run)
+    latest = _winget_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"winget {latest.version}", ctx.dry_run)
     if not file:
         return False
     if ctx.dry_run:

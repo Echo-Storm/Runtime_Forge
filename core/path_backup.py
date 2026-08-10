@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from core.logger import get_logger
+
 _MACHINE_ENV_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 _USER_ENV_KEY = r"Environment"
 MAX_BACKUPS = 50
@@ -62,8 +64,15 @@ def read_current_path() -> tuple[str, str]:
 
 def create_backup(app_dir: Path, reason: str) -> Optional[Path]:
     machine_path, user_path = read_current_path()
-    if not machine_path and not user_path:
-        return None  # couldn't read either — nothing meaningful to save
+    if not machine_path:
+        # Machine PATH is never legitimately empty on a real Windows install
+        # (System32 etc are always present) — an empty read here means the
+        # registry read itself failed, not that PATH truly has no entries.
+        # Saving it anyway would create a backup that, if ever restored,
+        # wipes machine-wide PATH. (User PATH being empty IS legitimate for
+        # plenty of accounts, so it alone doesn't block a backup.)
+        get_logger().status("Could not read machine PATH (empty result) - skipping PATH backup")
+        return None
 
     ts = datetime.now()
     backup = PathBackup(
@@ -95,10 +104,18 @@ def list_backups(app_dir: Path) -> List[PathBackup]:
     for path in sorted(backups_dir(app_dir).glob("path_backup_*.json"), reverse=True):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            machine_path = str(data.get("machine_path", ""))
+            if not machine_path:
+                # A backup file with no machine_path (corrupted, hand-
+                # edited, or written before this guard existed) is not
+                # something that should ever be selectable to restore —
+                # fail closed at the read layer, not just at write time.
+                get_logger().status(f"Skipping unusable PATH backup (empty machine path): {path.name}")
+                continue
             found.append(PathBackup(
                 timestamp=str(data["timestamp"]),
                 reason=str(data.get("reason", "")),
-                machine_path=str(data.get("machine_path", "")),
+                machine_path=machine_path,
                 user_path=str(data.get("user_path", "")),
             ))
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
@@ -116,6 +133,14 @@ def restore_backup(backup: PathBackup) -> bool:
     regardless of the broadcast; that's a Windows limitation, not
     something a broadcast can force past.
     """
+    if not backup.machine_path:
+        # Refuse outright rather than trust the caller — writing an empty
+        # machine PATH would break cmd/powershell path resolution
+        # system-wide. (An empty user_path is allowed through below; that's
+        # legitimate for plenty of accounts, not a sign of corruption.)
+        get_logger().fail("Refusing to restore: backup has an empty machine PATH (would wipe it system-wide)")
+        return False
+
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY, 0, winreg.KEY_SET_VALUE) as key:
             winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, backup.machine_path)

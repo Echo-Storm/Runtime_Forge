@@ -631,7 +631,21 @@ class MainWindow(QMainWindow):
         profile = next((p for p in self._profiles_cache if p.name == name), None)
         if profile is None:
             return
+        self._apply_profile(profile)
 
+    def _apply_profile(self, profile: profiles.Profile):
+        """Checks exactly this profile's component_keys in the tree.
+        Callers must set self._active_profile_name themselves first if the
+        profile should become the active one — this only touches the tree.
+
+        Split out from _on_profile_combo_changed so Import can call it
+        directly: _refresh_profile_combo() blocks the combo's signals
+        internally (so selecting the newly-imported item in the dropdown
+        doesn't recurse), which means currentIndexChanged never fires and
+        this logic would otherwise never run for an imported profile — the
+        combo would visibly show it "selected" while the tree silently kept
+        whatever was checked before the import.
+        """
         keys = set(profile.component_keys)
         self._applying_profile = True
         for key, item in self.tree_items.items():
@@ -639,7 +653,7 @@ class MainWindow(QMainWindow):
         self._applying_profile = False
 
         unknown = keys - set(self.tree_items.keys())
-        msg = f"Loaded profile '{name}' — {len(keys)} component(s) selected"
+        msg = f"Loaded profile '{profile.name}' — {len(keys)} component(s) selected"
         if unknown:
             msg += f" ({len(unknown)} no longer exist and were skipped)"
         self.status_bar.showMessage(msg, 5000)
@@ -712,6 +726,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import Failed", f"Could not save imported profile '{profile.name}'.")
             return
         self._refresh_profile_combo(select_name=profile.name)
+        # _refresh_profile_combo blocks the combo's signals while it runs,
+        # so currentIndexChanged never fires here — apply the import to the
+        # tree explicitly instead of relying on that signal path. Also
+        # re-run the button-enabled check: _refresh_profile_combo already
+        # called it once internally, but that was before _active_profile_name
+        # below was set, so the Update button could be left stale (disabled)
+        # if there wasn't already an active profile beforehand.
+        self._active_profile_name = profile.name
+        self._update_profile_buttons_enabled()
+        self._apply_profile(profile)
         self.status_bar.showMessage(f"Imported profile '{profile.name}' ({len(profile.component_keys)} component(s))", 5000)
 
     # ------------------------------------------------------------------
