@@ -81,7 +81,21 @@ def create_backup(app_dir: Path, reason: str) -> Optional[Path]:
         machine_path=machine_path,
         user_path=user_path,
     )
-    path = backups_dir(app_dir) / f"path_backup_{ts:%Y%m%d_%H%M%S}.json"
+    # Two backups created within the same wall-clock second (e.g. a double
+    # click, or a restore's own pre-restore safety backup landing in the
+    # same second as one just made manually) would otherwise share this
+    # exact filename and the second write would silently overwrite the
+    # first - permanently destroying an earlier real backup's content,
+    # which directly defeats "restoring itself takes a fresh backup first,
+    # so it's never a one-way door." Confirmed reproducible: three
+    # back-to-back create_backup() calls collapsed into one file before
+    # this guard existed.
+    base_dir = backups_dir(app_dir)
+    path = base_dir / f"path_backup_{ts:%Y%m%d_%H%M%S}.json"
+    suffix = 1
+    while path.exists():
+        path = base_dir / f"path_backup_{ts:%Y%m%d_%H%M%S}_{suffix}.json"
+        suffix += 1
     try:
         path.write_text(json.dumps(asdict(backup), indent=2), encoding="utf-8")
     except OSError:
