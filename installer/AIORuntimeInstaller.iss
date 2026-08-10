@@ -55,7 +55,15 @@ Name: "{group}\AIO Runtime Installer"; Filename: "{app}\AIORuntimeInstaller.exe"
 Name: "{group}\Uninstall AIO Runtime Installer"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\AIORuntimeInstaller.exe"; Description: "Launch AIO Runtime Installer now"; Flags: nowait postinstall skipifsilent
+; runascurrentuser: without it, Inno Setup launches [Run] entries using the
+; ORIGINAL (non-elevated) user token even though Setup itself is elevated -
+; AIORuntimeInstaller.exe's own manifest demands admin (uac_admin=True in
+; the PyInstaller spec), and a plain CreateProcess from a non-elevated
+; context can't silently re-elevate the way ShellExecute's UAC prompt can,
+; so it failed outright with "CreateProcess failed; code 740. The
+; requested operation requires elevation." Confirmed via a real install:
+; the install itself succeeded, only this post-install launch step failed.
+Filename: "{app}\AIORuntimeInstaller.exe"; Description: "Launch AIO Runtime Installer now"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 ; Deliberately no [UninstallDelete] entries for path_backups\, profiles\,
 ; or the .ini/log files the app generates next to itself at runtime -
