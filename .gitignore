@@ -8,6 +8,7 @@ AIORuntimeInstaller.ini
 build/
 dist/
 dist_installer/
+testbuilds/
 temp_installers/
 profiles/
 path_backups/
