@@ -1517,7 +1517,7 @@ def build_components() -> List[Component]:
         Component("gh", "GitHub CLI", "Dev Tools", _gh_is_installed, _gh_install, _gh_resolve_latest, path_entry=_gh_path_entry),
         Component("llvm", "LLVM/Clang", "Dev Tools", _llvm_is_installed, _llvm_install, _llvm_resolve_latest, path_entry=_llvm_path_entry),
         Component("ninja", "Ninja", "Dev Tools", _ninja_is_installed, _ninja_install, _ninja_resolve_latest, path_entry=_ninja_path_entry),
-        Component("jq", "jq", "Dev Tools", _jq_is_installed, _jq_install, _jq_resolve_latest, path_entry=_jq_path_entry),
+        Component("jq", "jq (JSON Processor)", "Dev Tools", _jq_is_installed, _jq_install, _jq_resolve_latest, path_entry=_jq_path_entry),
         # A separate category, not folded into Dev Tools — these two are a
         # deliberately narrow exception to this app's dev/runtime-tool
         # scope ("tools like that are pretty much required"), not the start
