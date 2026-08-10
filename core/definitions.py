@@ -122,9 +122,25 @@ def ensure_seven_zip(ctx: InstallContext) -> Optional[Path]:
 # WINGET
 # ---------------------------------------------------------------------------
 
+_WINGET_PATTERN = re.compile(r"^Microsoft\.DesktopAppInstaller_8wekyb3d8bbwe\.msixbundle$")
+_WINGET_FALLBACK_VERSION = "1.29.280"
+_WINGET_FALLBACK_URL = "https://aka.ms/getwinget"
+
+
+def _winget_resolve_latest() -> LatestInfo:
+    return get_latest_github_asset("microsoft/winget-cli", _WINGET_PATTERN, _WINGET_FALLBACK_URL, _WINGET_FALLBACK_VERSION)
+
+
 def _winget_is_installed() -> InstalledState:
     found = checks.command_on_path("winget")
-    return InstalledState(installed=bool(found))
+    if not found:
+        return InstalledState(installed=False)
+    # winget is a real console CLI tool (unlike VS Code's raw exe) — its
+    # own docs describe --version as the standard way to check, and it
+    # returns immediately with no window/process left behind (confirmed).
+    out = checks.command_version(found, ["--version"])
+    version = out.lstrip("v").strip() if out else None
+    return InstalledState(installed=True, version=version)
 
 
 def _add_appx_package(path: Path) -> bool:
@@ -216,8 +232,19 @@ def _netfx35_install(ctx: InstallContext) -> bool:
 # DIRECTX JUNE 2010
 # ---------------------------------------------------------------------------
 
+_DIRECTX_DLL = SYSTEM_ROOT / "System32" / "d3dx9_43.dll"
+
+
 def _directx_is_installed() -> InstalledState:
-    return InstalledState(installed=checks.file_exists(str(SYSTEM_ROOT / "System32" / "d3dx9_43.dll")))
+    # No resolve_latest here on purpose — June 2010 is genuinely the final
+    # DirectX End-User Runtime Microsoft ever released (DirectX 11/12 are
+    # OS-integrated components delivered via Windows Update, not a separate
+    # redistributable), so there's no "latest version" to check against.
+    # Still worth showing the real installed version instead of a bare "-".
+    if not _DIRECTX_DLL.is_file():
+        return InstalledState(installed=False)
+    version = checks.dll_version_field(str(_DIRECTX_DLL), "ProductVersion")
+    return InstalledState(installed=True, version=version)
 
 
 def _directx_install(ctx: InstallContext) -> bool:
@@ -586,14 +613,32 @@ def _jdk_install(jd: _JdkDef, ctx: InstallContext) -> bool:
 # VULKAN RUNTIME
 # ---------------------------------------------------------------------------
 
+_VULKAN_DLL = SYSTEM_ROOT / "System32" / "vulkan-1.dll"
+_VULKAN_FALLBACK_VERSION = "1.4.328.1"
+
+
+def _vulkan_resolve_latest() -> Optional[LatestInfo]:
+    log = get_logger()
+    try:
+        resp = requests.get("https://vulkan.lunarg.com/sdk/latest/windows.json", headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp.raise_for_status()
+        version = resp.json()["windows"]
+    except Exception as e:
+        log.status(f"Could not query LunarG latest Vulkan version ({e}); using pinned fallback")
+        version = _VULKAN_FALLBACK_VERSION
+    return LatestInfo(version=version, url="https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe", filename="vulkan-runtime.exe")
+
+
 def _vulkan_is_installed() -> InstalledState:
     # The Runtime registry key isn't always written (confirmed on a real
     # machine: absent despite vulkan-1.dll being present and the runtime
     # fully usable) — vulkan-1.dll in System32 is the loader every Vulkan
     # app actually depends on, so its presence is the more reliable signal.
     has_reg = checks.reg_key_exists("HKLM", r"SOFTWARE\Khronos\Vulkan\Runtime")
-    has_dll = checks.file_exists(str(SYSTEM_ROOT / "System32" / "vulkan-1.dll"))
-    return InstalledState(installed=has_reg or has_dll)
+    if not _VULKAN_DLL.is_file():
+        return InstalledState(installed=has_reg)
+    version = checks.dll_version_field(str(_VULKAN_DLL), "ProductVersion")
+    return InstalledState(installed=True, version=version)
 
 
 def _vulkan_install(ctx: InstallContext) -> bool:
@@ -615,11 +660,21 @@ def _webview2_is_installed() -> InstalledState:
     # Clients key under WOW6432Node even on a 64-bit OS (confirmed on a real
     # machine: absent from the plain HKLM path, present under WOW6432Node) —
     # same pattern as the Chromium-based updater family in general.
-    installed = checks.any_reg_key_exists("HKLM", [
+    for reg_path in (
         rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_ID}",
         rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_ID}",
-    ])
-    return InstalledState(installed=installed)
+    ):
+        # "pv" (product version) is the Evergreen updater's own version
+        # value, confirmed present on a real machine (151.0.4129.72). No
+        # resolve_latest — the runtime updates itself in the background
+        # continuously regardless of anything this app does, and no
+        # reliable public "latest version" API was found (the one commonly
+        # referenced by others failed TLS verification here) — not worth
+        # guessing at rather than showing a confirmed-accurate value.
+        version = checks.reg_value("HKLM", reg_path, "pv")
+        if version:
+            return InstalledState(installed=True, version=version)
+    return InstalledState(installed=False)
 
 
 def _webview2_install(ctx: InstallContext) -> bool:
@@ -874,11 +929,11 @@ def _vscode_install(ctx: InstallContext) -> bool:
 
 def build_components() -> List[Component]:
     components: List[Component] = [
-        Component("winget", "winget (Windows Package Manager)", "Core Runtimes", _winget_is_installed, _winget_install),
+        Component("winget", "winget (Windows Package Manager)", "Core Runtimes", _winget_is_installed, _winget_install, _winget_resolve_latest),
         Component("netfx35", ".NET Framework 3.5", "Core Runtimes", _netfx35_is_installed, _netfx35_install),
         Component("directx", "DirectX June 2010 (legacy DirectX 9.0c)", "Core Runtimes", _directx_is_installed, _directx_install),
         Component("openal", "OpenAL (Legacy compat + Soft runtime)", "Core Runtimes", _openal_is_installed, _openal_install),
-        Component("vulkan", "Vulkan Runtime", "Core Runtimes", _vulkan_is_installed, _vulkan_install),
+        Component("vulkan", "Vulkan Runtime", "Core Runtimes", _vulkan_is_installed, _vulkan_install, _vulkan_resolve_latest),
         Component("webview2", "Microsoft Edge WebView2 Runtime", "Core Runtimes", _webview2_is_installed, _webview2_install),
     ]
 
