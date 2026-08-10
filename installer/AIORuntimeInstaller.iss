@@ -9,7 +9,7 @@
 ; Build with (after `pyinstaller AIORuntimeInstaller.spec --clean` from the
 ; repo root has produced dist\AIORuntimeInstaller\):
 ;   "C:\Users\<you>\AppData\Local\Programs\Inno Setup 7\ISCC.exe" installer\AIORuntimeInstaller.iss
-; Output lands in dist_installer\AIORuntimeInstaller-Setup-1.0.0.exe (gitignored -
+; Output lands in dist_installer\AIORuntimeInstaller-Setup-0.1.0.exe (gitignored -
 ; this script is what's tracked, not the built installer binary).
 ;
 ; PrivilegesRequired=admin matches the app's own behavior: AIORuntimeInstaller.exe
@@ -20,7 +20,7 @@
 ; it always has the access it needs to write its portable .ini/logs next
 ; to the exe.
 
-#define AppVersion "1.0.0"
+#define AppVersion "0.1.0"
 
 [Setup]
 AppId={{F6F12F2C-79EC-435A-A140-9D8381D0F40C}

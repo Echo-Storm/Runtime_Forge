@@ -209,7 +209,7 @@ def _is_admin() -> bool:
 
 class MainWindow(QMainWindow):
     APP_NAME = "AIO Runtime Installer"
-    APP_VERSION = "1.0.0"
+    APP_VERSION = "0.1.0"
 
     def __init__(self):
         super().__init__()
