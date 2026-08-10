@@ -27,7 +27,7 @@ from typing import Callable, List, Optional
 
 import requests
 
-from core import checks
+from core import checks, path_backup
 from core.downloader import download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
@@ -615,6 +615,66 @@ def _net_install(nd: _NetDef, ctx: InstallContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# .NET SDK (added per coverage-gap audit against real installed programs —
+# this app previously only installed .NET *runtimes*, nothing to actually
+# build .NET apps with)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _NetSdkDef:
+    ver: str  # "8.0" — same channel scheme as _NetDef
+
+
+_NET_SDK_DEFS = [_NetSdkDef("8.0"), _NetSdkDef("9.0"), _NetSdkDef("10.0")]
+_DOTNET_SDK_ROOT = PROGRAM_FILES / "dotnet" / "sdk"
+# Verified live: aka.ms/dotnet/<channel>/dotnet-sdk-win-x64.exe resolves to
+# builds.dotnet.microsoft.com/dotnet/Sdk/<exact-version>/..., and that exact
+# version matches releases-index.json's "latest-sdk" field for the channel.
+_NET_SDK_FALLBACK_VERSIONS = {"8.0": "8.0.423", "9.0": "9.0.316", "10.0": "10.0.302"}
+
+
+def _net_sdk_is_installed(sd: _NetSdkDef) -> InstalledState:
+    match = checks.any_child_dir_matches(str(_DOTNET_SDK_ROOT), f"{sd.ver}.")
+    return InstalledState(installed=bool(match), version=match.name if match else None)
+
+
+def _net_sdk_resolve_latest(sd: _NetSdkDef) -> LatestInfo:
+    log = get_logger()
+    version = _NET_SDK_FALLBACK_VERSIONS[sd.ver]
+    try:
+        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp.raise_for_status()
+        for channel in resp.json().get("releases-index", []):
+            if channel.get("channel-version") == sd.ver:
+                version = channel.get("latest-sdk", version)
+                break
+    except Exception as e:
+        log.status(f"Could not query .NET releases index for SDK {sd.ver} ({e}); using pinned fallback")
+    return LatestInfo(
+        version=version,
+        url=f"https://aka.ms/dotnet/{sd.ver}/dotnet-sdk-win-x64.exe",
+        filename=f"dotnet-sdk-{sd.ver}.exe",
+    )
+
+
+def _net_sdk_path_entry() -> Optional[Path]:
+    # dotnet.exe (the shared launcher both SDK and runtimes use) lives at
+    # the dotnet root, not inside sdk\<version>\ — same directory every
+    # .NET runtime install already puts on PATH, but the SDK's own `dotnet
+    # build`/`dotnet run` workflow is the case where that actually matters
+    # for day-to-day command-line use.
+    return PROGRAM_FILES / "dotnet"
+
+
+def _net_sdk_install(sd: _NetSdkDef, ctx: InstallContext) -> bool:
+    latest = _net_sdk_resolve_latest(sd)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f".NET {sd.ver} SDK {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    return run_exe(file, ["/quiet", "/norestart"], f".NET {sd.ver} SDK {latest.version}", ctx.dry_run)
+
+
+# ---------------------------------------------------------------------------
 # TEMURIN JDK
 # ---------------------------------------------------------------------------
 
@@ -998,6 +1058,317 @@ def _vscode_install(ctx: InstallContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# GITHUB CLI
+# ---------------------------------------------------------------------------
+
+_GH_PATTERN = re.compile(r"^gh_[\d.]+_windows_amd64\.msi$")
+_GH_FALLBACK_VERSION = "2.95.0"
+_GH_FALLBACK_URL = "https://github.com/cli/cli/releases/download/v2.95.0/gh_2.95.0_windows_amd64.msi"
+_GH_EXE = PROGRAM_FILES / "GitHub CLI" / "gh.exe"
+
+
+def _gh_resolve_latest() -> LatestInfo:
+    return get_latest_github_asset("cli/cli", _GH_PATTERN, _GH_FALLBACK_URL, _GH_FALLBACK_VERSION)
+
+
+def _gh_is_installed() -> InstalledState:
+    if not _GH_EXE.is_file():
+        return InstalledState(installed=False)
+    version = checks.dll_version_field(str(_GH_EXE), "ProductVersion")
+    return InstalledState(installed=True, version=version)
+
+
+def _gh_path_entry() -> Optional[Path]:
+    return _GH_EXE.parent
+
+
+def _gh_install(ctx: InstallContext) -> bool:
+    latest = _gh_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"GitHub CLI {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    return run_msi(file, ["/quiet", "/norestart"], f"GitHub CLI {latest.version}", ctx.dry_run)
+
+
+# ---------------------------------------------------------------------------
+# LLVM
+# ---------------------------------------------------------------------------
+
+_LLVM_PATTERN = re.compile(r"^LLVM-[\d.]+-win64\.exe$")
+_LLVM_FALLBACK_VERSION = "22.1.5"
+_LLVM_FALLBACK_URL = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.5/LLVM-22.1.5-win64.exe"
+_LLVM_EXE = PROGRAM_FILES / "LLVM" / "bin" / "clang.exe"
+
+
+def _llvm_resolve_latest() -> LatestInfo:
+    # Not using get_latest_github_asset() — LLVM's release tags are
+    # "llvmorg-22.1.8", not the "v22.1.8" convention every other
+    # GitHub-releases-based component here uses, so the shared helper's
+    # tag_name.lstrip("v") would leave the "llvmorg-" prefix in place
+    # (lstrip only strips from the very start, and "llvmorg-..." doesn't
+    # start with "v"). Small dedicated resolver instead of adding a
+    # prefix parameter to a function 6+ other components already rely on.
+    log = get_logger()
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/llvm/llvm-project/releases/latest",
+            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+        )
+        resp.raise_for_status()
+        rel = resp.json()
+        for asset in rel.get("assets", []):
+            if _LLVM_PATTERN.search(asset["name"]):
+                return LatestInfo(
+                    version=rel["tag_name"].removeprefix("llvmorg-"),
+                    url=asset["browser_download_url"],
+                    filename=asset["name"],
+                )
+        log.status("llvm/llvm-project latest release had no matching asset; using pinned fallback")
+    except Exception as e:
+        log.status(f"Could not query GitHub for llvm/llvm-project latest release ({e}); using pinned fallback")
+    return LatestInfo(version=_LLVM_FALLBACK_VERSION, url=_LLVM_FALLBACK_URL, filename=_LLVM_FALLBACK_URL.rsplit("/", 1)[-1])
+
+
+def _llvm_is_installed() -> InstalledState:
+    if not _LLVM_EXE.is_file():
+        return InstalledState(installed=False)
+    version = checks.dll_version_field(str(_LLVM_EXE), "ProductVersion")
+    return InstalledState(installed=True, version=version)
+
+
+def _llvm_path_entry() -> Optional[Path]:
+    return _LLVM_EXE.parent
+
+
+def _llvm_install(ctx: InstallContext) -> bool:
+    latest = _llvm_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"LLVM {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    # LLVM's installer is NSIS-based; /S is the standard NSIS silent flag.
+    return run_exe(file, ["/S"], f"LLVM {latest.version}", ctx.dry_run)
+
+
+# ---------------------------------------------------------------------------
+# 7-ZIP (the full application — distinct from the internal portable 7za.exe
+# ensure_seven_zip() bootstraps purely for DirectX extraction)
+# ---------------------------------------------------------------------------
+
+_SEVENZIP_APP_EXE = PROGRAM_FILES / "7-Zip" / "7z.exe"
+# No resolve_latest — 7-zip.org has no JSON/API for "latest version", and
+# scraping its download page was confirmed unreliable during research: the
+# page's "primary" listed download was 23.01, but the actually-current
+# stable release (confirmed via a real installed copy on the machine this
+# was built on) was 26.02. Hand-pinned like Python, refreshed by hand
+# rather than guessed at from an unreliable source. This exact URL pattern
+# (https://www.7-zip.org/a/7z<version-no-dot>-x64.exe) was verified live.
+_SEVENZIP_APP_PINNED_VERSION = "26.02"
+_SEVENZIP_APP_URL = "https://www.7-zip.org/a/7z2602-x64.exe"
+
+
+def _sevenzip_app_resolve_latest() -> LatestInfo:
+    return LatestInfo(version=_SEVENZIP_APP_PINNED_VERSION, url=_SEVENZIP_APP_URL, filename="7z2602-x64.exe")
+
+
+def _sevenzip_app_is_installed() -> InstalledState:
+    if not _SEVENZIP_APP_EXE.is_file():
+        return InstalledState(installed=False)
+    version = checks.dll_version_field(str(_SEVENZIP_APP_EXE), "ProductVersion")
+    return InstalledState(installed=True, version=version)
+
+
+def _sevenzip_app_path_entry() -> Optional[Path]:
+    return _SEVENZIP_APP_EXE.parent
+
+
+def _sevenzip_app_install(ctx: InstallContext) -> bool:
+    latest = _sevenzip_app_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"7-Zip {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    # 7-Zip's installer is NSIS-based; /S is the standard NSIS silent flag.
+    return run_exe(file, ["/S"], f"7-Zip {latest.version}", ctx.dry_run)
+
+
+# ---------------------------------------------------------------------------
+# WINRAR
+# ---------------------------------------------------------------------------
+
+_WINRAR_EXE = PROGRAM_FILES / "WinRAR" / "WinRAR.exe"
+# No resolve_latest — win-rar.com has no JSON/API for "latest version"
+# either; hand-pinned like 7-Zip, same reasoning. WinRAR is shareware (free
+# to use past the 40-day trial with a persistent nag, never functionally
+# expires) — installing it here doesn't change that, worth knowing.
+_WINRAR_PINNED_VERSION = "7.23"
+_WINRAR_URL = "https://www.win-rar.com/fileadmin/winrar-versions/winrar/winrar-x64-723.exe"
+
+
+def _winrar_resolve_latest() -> LatestInfo:
+    return LatestInfo(version=_WINRAR_PINNED_VERSION, url=_WINRAR_URL, filename="winrar-x64-723.exe")
+
+
+def _winrar_is_installed() -> InstalledState:
+    if not _WINRAR_EXE.is_file():
+        return InstalledState(installed=False)
+    version = checks.dll_version_field(str(_WINRAR_EXE), "ProductVersion")
+    return InstalledState(installed=True, version=version)
+
+
+def _winrar_path_entry() -> Optional[Path]:
+    return _WINRAR_EXE.parent
+
+
+def _winrar_install(ctx: InstallContext) -> bool:
+    latest = _winrar_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"WinRAR {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    return run_exe(file, ["/S"], f"WinRAR {latest.version}", ctx.dry_run)
+
+
+# ---------------------------------------------------------------------------
+# NINJA (ships as a raw binary in a zip — no installer at all, unlike
+# everything else in this file)
+# ---------------------------------------------------------------------------
+
+_NINJA_PATTERN = re.compile(r"^ninja-win\.zip$")
+_NINJA_FALLBACK_VERSION = "1.13.2"
+_NINJA_FALLBACK_URL = "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip"
+_NINJA_INSTALL_DIR = PROGRAM_FILES / "ninja"
+_NINJA_EXE = _NINJA_INSTALL_DIR / "ninja.exe"
+_NINJA_VERSION_FILE = _NINJA_INSTALL_DIR / "VERSION.txt"
+
+
+def _ninja_resolve_latest() -> LatestInfo:
+    return get_latest_github_asset("ninja-build/ninja", _NINJA_PATTERN, _NINJA_FALLBACK_URL, _NINJA_FALLBACK_VERSION)
+
+
+def _ninja_is_installed() -> InstalledState:
+    if not _NINJA_EXE.is_file():
+        return InstalledState(installed=False)
+    # ninja.exe carries no PE VERSIONINFO resource at all (confirmed: every
+    # field empty) — unlike everything else version-tracked in this file.
+    # Since this app fully controls the install (no vendor installer in the
+    # loop), install() writes its own VERSION.txt sidecar recording exactly
+    # what it placed there, read back here — self-authored but no less
+    # reliable than a PE resource would be, since nothing else can write it.
+    version = _NINJA_VERSION_FILE.read_text(encoding="utf-8").strip() if _NINJA_VERSION_FILE.is_file() else None
+    return InstalledState(installed=True, version=version)
+
+
+def _ninja_path_entry() -> Optional[Path]:
+    return _NINJA_INSTALL_DIR
+
+
+def _ninja_install(ctx: InstallContext) -> bool:
+    log = get_logger()
+    latest = _ninja_resolve_latest()
+    zip_path = download(latest.url, ctx.temp_dir, latest.filename, f"ninja {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not zip_path:
+        return False
+    if ctx.dry_run:
+        log.dry(f"Would place ninja.exe at {_NINJA_EXE} and add {_NINJA_INSTALL_DIR} to PATH")
+        return True
+
+    extract_dir = ctx.temp_dir / "ninja_extract"
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            _safe_extract(zf, extract_dir)
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
+        log.fail(f"Extraction failed: {e}")
+        return False
+
+    ninja_exe = extract_dir / "ninja.exe"
+    if not ninja_exe.is_file():
+        log.fail("ninja.exe not found in archive")
+        return False
+
+    try:
+        _NINJA_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ninja_exe, _NINJA_EXE)
+        _NINJA_VERSION_FILE.write_text(latest.version, encoding="utf-8")
+    except OSError as e:
+        log.fail(f"Copy failed: {e}")
+        return False
+
+    if not path_backup.add_directory_to_path(_NINJA_INSTALL_DIR):
+        log.status(f"WARNING: could not add {_NINJA_INSTALL_DIR} to PATH - you may need to add it manually")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# JQ (single raw exe — no installer, no archive even)
+# ---------------------------------------------------------------------------
+
+_JQ_PATTERN = re.compile(r"^jq-windows-amd64\.exe$")
+_JQ_FALLBACK_VERSION = "1.8.2"
+_JQ_FALLBACK_URL = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"
+_JQ_INSTALL_DIR = PROGRAM_FILES / "jq"
+_JQ_EXE = _JQ_INSTALL_DIR / "jq.exe"
+_JQ_VERSION_FILE = _JQ_INSTALL_DIR / "VERSION.txt"
+
+
+def _jq_resolve_latest() -> LatestInfo:
+    # Not using get_latest_github_asset() — jq's release tags are "jq-1.8.2",
+    # not the "v1.8.2" convention (same situation as LLVM, different prefix).
+    log = get_logger()
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/jqlang/jq/releases/latest",
+            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+        )
+        resp.raise_for_status()
+        rel = resp.json()
+        for asset in rel.get("assets", []):
+            if _JQ_PATTERN.search(asset["name"]):
+                return LatestInfo(
+                    version=rel["tag_name"].removeprefix("jq-"),
+                    url=asset["browser_download_url"],
+                    filename="jq.exe",
+                )
+        log.status("jqlang/jq latest release had no matching asset; using pinned fallback")
+    except Exception as e:
+        log.status(f"Could not query GitHub for jqlang/jq latest release ({e}); using pinned fallback")
+    return LatestInfo(version=_JQ_FALLBACK_VERSION, url=_JQ_FALLBACK_URL, filename="jq.exe")
+
+
+def _jq_is_installed() -> InstalledState:
+    if not _JQ_EXE.is_file():
+        return InstalledState(installed=False)
+    # jq.exe also carries no PE VERSIONINFO resource (confirmed) — same
+    # self-authored VERSION.txt approach as ninja, for the same reason.
+    version = _JQ_VERSION_FILE.read_text(encoding="utf-8").strip() if _JQ_VERSION_FILE.is_file() else None
+    return InstalledState(installed=True, version=version)
+
+
+def _jq_path_entry() -> Optional[Path]:
+    return _JQ_INSTALL_DIR
+
+
+def _jq_install(ctx: InstallContext) -> bool:
+    log = get_logger()
+    latest = _jq_resolve_latest()
+    file = download(latest.url, ctx.temp_dir, "jq-download.exe", f"jq {latest.version}", ctx.dry_run, ctx.progress_cb)
+    if not file:
+        return False
+    if ctx.dry_run:
+        log.dry(f"Would place jq.exe at {_JQ_EXE} and add {_JQ_INSTALL_DIR} to PATH")
+        return True
+
+    try:
+        _JQ_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(file, _JQ_EXE)
+        _JQ_VERSION_FILE.write_text(latest.version, encoding="utf-8")
+    except OSError as e:
+        log.fail(f"Copy failed: {e}")
+        return False
+
+    if not path_backup.add_directory_to_path(_JQ_INSTALL_DIR):
+        log.status(f"WARNING: could not add {_JQ_INSTALL_DIR} to PATH - you may need to add it manually")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # REGISTRY
 # ---------------------------------------------------------------------------
 
@@ -1026,6 +1397,15 @@ def build_components() -> List[Component]:
             lambda nd=nd: _net_resolve_latest(nd),
         ))
 
+    for sd in _NET_SDK_DEFS:
+        components.append(Component(
+            f"net_sdk_{sd.ver}", f".NET {sd.ver} SDK", ".NET SDK",
+            lambda sd=sd: _net_sdk_is_installed(sd),
+            lambda ctx, sd=sd: _net_sdk_install(sd, ctx),
+            lambda sd=sd: _net_sdk_resolve_latest(sd),
+            path_entry=_net_sdk_path_entry,
+        ))
+
     for jd in _JDK_DEFS:
         components.append(Component(
             f"jdk_{jd.feature_version}", jd.name, "Java (Temurin JDK)",
@@ -1050,6 +1430,16 @@ def build_components() -> List[Component]:
         Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest, path_entry=_node_path_entry),
         Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry),
         Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install, _vscode_resolve_latest, path_entry=_vscode_path_entry),
+        Component("gh", "GitHub CLI", "Dev Tools", _gh_is_installed, _gh_install, _gh_resolve_latest, path_entry=_gh_path_entry),
+        Component("llvm", "LLVM/Clang", "Dev Tools", _llvm_is_installed, _llvm_install, _llvm_resolve_latest, path_entry=_llvm_path_entry),
+        Component("ninja", "Ninja", "Dev Tools", _ninja_is_installed, _ninja_install, _ninja_resolve_latest, path_entry=_ninja_path_entry),
+        Component("jq", "jq", "Dev Tools", _jq_is_installed, _jq_install, _jq_resolve_latest, path_entry=_jq_path_entry),
+        # A separate category, not folded into Dev Tools — these two are a
+        # deliberately narrow exception to this app's dev/runtime-tool
+        # scope ("tools like that are pretty much required"), not the start
+        # of a broader general-app-installer direction.
+        Component("7zip", "7-Zip", "Archive Tools", _sevenzip_app_is_installed, _sevenzip_app_install, _sevenzip_app_resolve_latest, path_entry=_sevenzip_app_path_entry),
+        Component("winrar", "WinRAR", "Archive Tools", _winrar_is_installed, _winrar_install, _winrar_resolve_latest, path_entry=_winrar_path_entry),
     ]
 
     return components

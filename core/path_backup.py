@@ -157,6 +157,38 @@ def restore_backup(backup: PathBackup) -> bool:
     return True
 
 
+def add_directory_to_path(dir_path: Path) -> bool:
+    """Appends dir_path to the machine PATH if it isn't already there.
+
+    For the handful of components that ship as a raw binary with no
+    installer of their own (ninja, jq) — everything else in this app gets
+    its PATH entry from the vendor's own installer; these two have no such
+    installer, so this app has to be the one to add it. Idempotent: if the
+    exact directory is already present (case-insensitively, trailing slash
+    ignored), does nothing and returns True rather than accumulating
+    duplicate entries on repeated installs. Only ever appends — never
+    removes or reorders anything already there.
+    """
+    machine_path, _ = read_current_path()
+    if not machine_path:
+        return False  # same "never trust an empty read" stance as create_backup()
+
+    target = str(dir_path).rstrip("\\/").lower()
+    entries = [e for e in machine_path.split(";") if e.strip()]
+    if any(e.strip().rstrip("\\/").lower() == target for e in entries):
+        return True  # already present
+
+    new_path = machine_path.rstrip(";") + ";" + str(dir_path)
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
+    except OSError:
+        return False
+
+    _broadcast_environment_change()
+    return True
+
+
 def _broadcast_environment_change() -> None:
     HWND_BROADCAST = 0xFFFF
     WM_SETTINGCHANGE = 0x1A

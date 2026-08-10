@@ -14,8 +14,8 @@ What's different from the PowerShell version
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
   release exists, what's available) instead of a plain yes/no. Every one of
-  the 37 components reports its real installed version, not just presence;
-  22 have genuine update detection against a real source (a live API, or
+  the 46 components reports its real installed version, not just presence;
+  31 have genuine update detection against a real source (a live API, or
   this app's own pinned install target). The rest — DirectX, .NET Framework
   4.8.1, WebView2, and pre-2015 VC++ redists — have no meaningful "latest
   version" to compare against at all (verified, not just not gotten to:
@@ -99,9 +99,11 @@ Dev tools
   the OpenAL false-positive (an NVIDIA-bundled OpenAL32.dll passing a
   filename-only check) — reach for it before guessing at a detection fix
   when two binaries share a filename but not an identity.
-- `tests/test_profiles_ui.py` — drives a real MainWindow instance to
-  exercise the Profiles feature end to end (not a pytest suite, run
-  directly: `venv\Scripts\python.exe tests\test_profiles_ui.py`).
+- `tests/` — one script per fix/feature, each driving a real MainWindow
+  (or component registry) instance directly rather than mocking anything.
+  Not a pytest suite — run any of them directly:
+  `venv\Scripts\python.exe tests\<name>.py`. Prints `ALL_OK: True/False`
+  and exits accordingly.
 
 What It Installs / Enables
 -----------------------------------------------
@@ -120,16 +122,33 @@ the 2015–2022 pair always resolving to the latest evergreen release.
 **.NET Runtimes** — Framework 4.8.1, plus .NET 8/9/10 ASP.NET Core + Desktop
 Runtimes (6 and 7 are intentionally omitted — both are past end-of-support).
 
+**.NET SDK** — 8, 9, and 10, for actually building .NET apps rather than
+just running them. Same Microsoft releases-metadata API as the runtimes
+above (it has a `latest-sdk` field per channel alongside `latest-runtime`).
+
 **Java (Temurin JDK)** — 21, 17, and 8, resolved against Adoptium's latest
 API per major version.
 
 **Python** — 3.10, 3.11, 3.12, 3.13 (pinned patch versions, all-users
 install with PATH and the launcher).
 
-**Dev Tools** — PowerShell 7, Git for Windows, Node.js (LTS), CMake, and
-Visual Studio Code — each resolved to its latest release/LTS at scan time
-via GitHub/nodejs.org APIs, with a pinned fallback if the API can't be
-reached.
+**Dev Tools** — PowerShell 7, Git for Windows, Node.js (LTS), CMake, Visual
+Studio Code, GitHub CLI, LLVM/Clang, ninja, and jq — each resolved to its
+latest release/LTS at scan time via GitHub/nodejs.org/Microsoft APIs, with
+a pinned fallback if the API can't be reached. ninja and jq ship as a raw
+binary/zip with no installer at all — this app places the binary itself
+and adds its folder to PATH directly (`core/path_backup.add_directory_to_path`),
+the only two components that need to.
+
+**Archive Tools** — 7-Zip and WinRAR. A deliberately narrow exception to
+this app's dev/runtime-tool scope, not a step toward a general app
+installer — both are close to universally needed regardless of what the
+machine is otherwise for. Neither publishes a live "latest version" API
+(confirmed unreliable for both during research — a scraped download page
+that doesn't reflect the real current release is worse than no check at
+all), so both are hand-pinned like Python rather than tracked live. WinRAR
+is shareware (nags for a license after the 40-day trial, never actually
+expires) — installing it here doesn't change that.
 
 Behavior Notes
 --------------
