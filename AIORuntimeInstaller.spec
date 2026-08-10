@@ -15,7 +15,11 @@ a = Analysis(
     ['aio_runtime_installer.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # Copies the whole assets/ folder next to the built exe (get_app_dir()
+    # resolves to that same directory when frozen) — needed now that
+    # windows_terminal_settings.json is a real runtime-read data file, not
+    # just a build-time icon resource like everything previously in here.
+    datas=[('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

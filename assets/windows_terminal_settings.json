@@ -1,0 +1,361 @@
+{
+    "$help": "https://aka.ms/terminal-documentation",
+    "$schema": "https://aka.ms/terminal-profiles-schema",
+    "actions": [],
+    "defaultProfile": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
+    "keybindings": [],
+    "newTabMenu": 
+    [
+        {
+            "type": "remainingProfiles"
+        }
+    ],
+    "profiles": 
+    {
+        "defaults": 
+        {
+            "startingDirectory": null,
+            "bellStyle": "none",
+            "scrollbarState": "visible",
+            "historySize": 30000,
+            "font": 
+            {
+                "face": "Cascadia Code",
+                "size": 11
+            },
+            "opacity": 85,
+            "useAcrylic": true
+        },
+        "list": 
+        [
+            {
+                "colorScheme": "CMD Green",
+                "commandline": "%SystemRoot%\\System32\\cmd.exe",
+                "guid": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
+                "icon": "%SystemRoot%\\System32\\cmd.exe",
+                "name": "\ud83d\udfe9 Command Prompt"
+            },
+            {
+                "colorScheme": "Admin Orange",
+                "commandline": "cmd.exe",
+                "elevate": true,
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123006}",
+                "icon": "%SystemRoot%\\System32\\cmd.exe",
+                "name": "\ud83d\udfe7 Command Prompt (Admin)",
+                "opacity": 100,
+                "useAcrylic": false
+            },
+            {
+                "colorScheme": "PowerShell Blue",
+                "commandline": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123004}",
+                "icon": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "name": "\ud83d\udfe6 PowerShell 7"
+            },
+            {
+                "colorScheme": "Admin Orange",
+                "commandline": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "elevate": true,
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123005}",
+                "icon": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "name": "\ud83d\udfe7 PowerShell 7 (Admin)",
+                "opacity": 100,
+                "useAcrylic": false
+            },
+            {
+                "colorScheme": "PowerShell Blue",
+                "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
+                "icon": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "name": "\ud83d\udfe6 Windows PowerShell"
+            },
+            {
+                "colorScheme": "Admin Orange",
+                "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "elevate": true,
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123009}",
+                "name": "\ud83d\udfe7 Windows PowerShell (Admin)",
+                "opacity": 100,
+                "useAcrylic": false
+            },
+            {
+                "colorScheme": "Python Burgundy",
+                "commandline": "C:\\Program Files\\Python313\\python.exe",
+                "guid": "{5d8aadd8-c4a2-4f99-a493-ecaec8042092}",
+                "icon": "C:\\Program Files\\Python313\\python.exe",
+                "name": "\ud83d\udfe5 Python 3.13"
+            },
+            {
+                "colorScheme": "Python Burgundy",
+                "commandline": "C:\\Program Files\\Python312\\python.exe",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123003}",
+                "hidden": true,
+                "icon": "C:\\Program Files\\Python312\\python.exe",
+                "name": "\ud83d\udfe5 Python 3.12"
+            },
+            {
+                "colorScheme": "Python Burgundy",
+                "commandline": "C:\\Program Files\\Python311\\python.exe",
+                "guid": "{993bbbcd-36f1-42fd-bda7-c22eba42e0b8}",
+                "hidden": false,
+                "icon": "C:\\Program Files\\Python311\\python.exe",
+                "name": "\ud83d\udfe5 Python 3.11"
+            },
+            {
+                "colorScheme": "Python Burgundy",
+                "commandline": "C:\\Program Files\\Python310\\python.exe",
+                "guid": "{7260a0c0-2da0-43c3-b171-9936aa4a179c}",
+                "hidden": true,
+                "icon": "C:\\Program Files\\Python310\\python.exe",
+                "name": "\ud83d\udfe5 Python 3.10"
+            },
+            {
+                "colorScheme": "Node Green",
+                "commandline": "C:\\Program Files\\nodejs\\node.exe",
+                "guid": "{ab8758b1-e4c5-493d-af1c-5d141ba1483a}",
+                "icon": "C:\\Program Files\\nodejs\\node.exe",
+                "name": "\ud83d\udfe9 Node.js REPL"
+            },
+            {
+                "colorScheme": "Java Coffee",
+                "commandline": "pwsh.exe -NoExit -Command \"& (Get-ChildItem 'C:\\Program Files\\Eclipse Adoptium\\jdk-21*\\bin\\jshell.exe' | Select-Object -First 1).FullName\"",
+                "guid": "{c4ff551a-acea-4e5d-b11a-a739fd683b4a}",
+                "icon": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot\\bin\\javaw.exe",
+                "name": "\ud83d\udfeb JShell (JDK 21)"
+            },
+            {
+                "colorScheme": "Tool Purple",
+                "commandline": "\"C:\\Program Files\\Git\\bin\\bash.exe\" --login -i",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123007}",
+                "icon": "C:\\Program Files\\Git\\git-bash.exe",
+                "name": "\ud83d\udfea Git Bash"
+            },
+            {
+                "colorScheme": "Tool Purple",
+                "commandline": "C:\\msys64\\msys2_shell.cmd -defterm -here -no-start -mingw64",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123001}",
+                "hidden": true,
+                "icon": "C:\\msys64\\mingw64.exe",
+                "name": "\ud83d\udfea MinGW64 (MSYS2)"
+            },
+            {
+                "colorScheme": "Tool Purple",
+                "commandline": "C:\\msys64\\msys2_shell.cmd -defterm -here -no-start -clang64",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123002}",
+                "hidden": true,
+                "icon": "C:\\msys64\\clang64.exe",
+                "name": "\ud83d\udfea Clang64 (MSYS2)"
+            },
+            {
+                "colorScheme": "Tool Purple",
+                "commandline": "C:\\msys64\\msys2_shell.cmd -defterm -here -no-start -msys",
+                "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123008}",
+                "hidden": true,
+                "icon": "C:\\msys64\\msys2.exe",
+                "name": "\ud83d\udfea MSYS2"
+            },
+            {
+                "colorScheme": "VS Slate",
+                "guid": "{037bc08a-38a5-56b8-b417-222ebd52d898}",
+                "hidden": false,
+                "name": "\ud83d\udfeb Dev CMD for VS 2022",
+                "source": "Windows.Terminal.VisualStudio"
+            },
+            {
+                "colorScheme": "VS Slate",
+                "guid": "{0d771956-ac6f-5302-a510-02f7cea10a12}",
+                "hidden": false,
+                "name": "\ud83d\udfeb Dev PS for VS 2022",
+                "source": "Windows.Terminal.VisualStudio"
+            }
+        ]
+    },
+    "schemes": 
+    [
+        {
+            "background": "#2B1A00",
+            "black": "#1A0F00",
+            "blue": "#2A4B6B",
+            "brightBlack": "#6A4A2A",
+            "brightBlue": "#6FB0E0",
+            "brightCyan": "#8FD0D0",
+            "brightGreen": "#6FB07A",
+            "brightPurple": "#C08FB0",
+            "brightRed": "#D06B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#FFD7A6",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2A5B5B",
+            "foreground": "#FFE6C7",
+            "green": "#3A6B3A",
+            "name": "Admin Orange",
+            "purple": "#5B3E5B",
+            "red": "#8B3A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#FFEEDD",
+            "yellow": "#B06B2A"
+        },
+        {
+            "background": "#0C1F14",
+            "black": "#0B1A12",
+            "blue": "#1F4F3F",
+            "brightBlack": "#5A5A5A",
+            "brightBlue": "#4F8FB0",
+            "brightCyan": "#6FB0B0",
+            "brightGreen": "#4FB07A",
+            "brightPurple": "#9A7FA0",
+            "brightRed": "#B04B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D0B07A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2F4F4F",
+            "foreground": "#C0C0C0",
+            "green": "#2E8B57",
+            "name": "CMD Green",
+            "purple": "#5B3E5B",
+            "red": "#7A2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#D0D0D0",
+            "yellow": "#8B6B2E"
+        },
+        {
+            "background": "#0B1C2D",
+            "black": "#07121A",
+            "blue": "#1E4A6A",
+            "brightBlack": "#5A6A78",
+            "brightBlue": "#6FB0E0",
+            "brightCyan": "#6FB0B0",
+            "brightGreen": "#4FB07A",
+            "brightPurple": "#9A7FA0",
+            "brightRed": "#B04B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D0B07A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2F4F5F",
+            "foreground": "#D0E7FF",
+            "green": "#2E8B57",
+            "name": "PowerShell Blue",
+            "purple": "#4B3A5B",
+            "red": "#7A2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#C8DFF0",
+            "yellow": "#8B6B2E"
+        },
+        {
+            "background": "#2A1416",
+            "black": "#120A0A",
+            "blue": "#2A3A4B",
+            "brightBlack": "#5A4A4A",
+            "brightBlue": "#6B8FB0",
+            "brightCyan": "#6FB0B0",
+            "brightGreen": "#6FB07A",
+            "brightPurple": "#A07FA0",
+            "brightRed": "#B04B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D0B07A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2A4B4B",
+            "foreground": "#E6D6D6",
+            "green": "#3A6B4A",
+            "name": "Python Burgundy",
+            "purple": "#5B2A3A",
+            "red": "#6B2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#E8D8D8",
+            "yellow": "#8B6B5A"
+        },
+        {
+            "background": "#1B1428",
+            "black": "#0B0710",
+            "blue": "#2A3A6B",
+            "brightBlack": "#5A4A6A",
+            "brightBlue": "#6FB0E0",
+            "brightCyan": "#8FD0D0",
+            "brightGreen": "#6FB07A",
+            "brightPurple": "#C08FF0",
+            "brightRed": "#B04B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D0B07A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2A4B6B",
+            "foreground": "#E6DFFF",
+            "green": "#2A6B4A",
+            "name": "Tool Purple",
+            "purple": "#5B3E7B",
+            "red": "#6B2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#EDE6FF",
+            "yellow": "#8B6B5A"
+        },
+        {
+            "background": "#1E1E1E",
+            "black": "#0F0F0F",
+            "blue": "#1F4F6F",
+            "brightBlack": "#5A5A5A",
+            "brightBlue": "#6FB0E0",
+            "brightCyan": "#6FB0B0",
+            "brightGreen": "#4FB07A",
+            "brightPurple": "#9A7FA0",
+            "brightRed": "#B04B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D0B07A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2F4F5F",
+            "foreground": "#D0D0D0",
+            "green": "#2E8B57",
+            "name": "VS Slate",
+            "purple": "#4B3A5B",
+            "red": "#7A2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#D8D8D8",
+            "yellow": "#8B6B2E"
+        },
+        {
+            "background": "#0C1F0A",
+            "black": "#0A150A",
+            "blue": "#1F4F5F",
+            "brightBlack": "#4A5A4A",
+            "brightBlue": "#6FB0E0",
+            "brightCyan": "#6FD0C0",
+            "brightGreen": "#8FE0A0",
+            "brightPurple": "#9A9FA0",
+            "brightRed": "#D06B4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#D8D08A",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#2F5F4F",
+            "foreground": "#D6FFE0",
+            "green": "#68A063",
+            "name": "Node Green",
+            "purple": "#3E5B4B",
+            "red": "#7A2A2A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#D8E8D8",
+            "yellow": "#8B8B2E"
+        },
+        {
+            "background": "#2A1D12",
+            "black": "#180F08",
+            "blue": "#2A3A4B",
+            "brightBlack": "#6A5A4A",
+            "brightBlue": "#6B9FE0",
+            "brightCyan": "#8FC0B0",
+            "brightGreen": "#9AC08A",
+            "brightPurple": "#C0A08F",
+            "brightRed": "#E08A4B",
+            "brightWhite": "#FFFFFF",
+            "brightYellow": "#F0C070",
+            "cursorColor": "#FFFFFF",
+            "cyan": "#4B6B5F",
+            "foreground": "#F0DFC7",
+            "green": "#6B8B3A",
+            "name": "Java Coffee",
+            "purple": "#6B4E3B",
+            "red": "#B0502A",
+            "selectionBackground": "#FFFFFF",
+            "white": "#EEDDCC",
+            "yellow": "#B0862A"
+        }
+    ],
+    "themes": []
+}

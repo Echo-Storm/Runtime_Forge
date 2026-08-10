@@ -16,12 +16,14 @@ downloaded .exe with its documented silent flags) or a native OS tool
 (dism.exe for the NetFx3 feature) exactly as ALLTHERUNTIMES.ps1 does.
 """
 
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -31,6 +33,7 @@ from core import checks, path_backup
 from core.downloader import download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
+from core.paths import get_app_dir
 from core.signature import check_signature
 from core.version_resolvers import LatestInfo, get_latest_adoptium, get_latest_github_asset, get_latest_node_lts
 
@@ -1369,6 +1372,87 @@ def _jq_install(ctx: InstallContext) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# WINDOWS TERMINAL PROFILE (a curated, color-coded settings.json — a profile
+# per Python version, a Node REPL, a JShell/JDK 21 REPL, Git Bash, MSYS2,
+# VS 2022 dev consoles, plus elevated variants. Bundled with this app rather
+# than referenced from its personal OneDrive backup location, so this
+# component is fully self-contained and works on a fresh machine that
+# hasn't synced that OneDrive folder yet — the whole point of this app.)
+# ---------------------------------------------------------------------------
+
+_TERMINAL_PROFILE_TARGET = (
+    LOCAL_APPDATA / "Packages" / "Microsoft.WindowsTerminal_8wekyb3d8bbwe" / "LocalState" / "settings.json"
+)
+
+
+def _terminal_profile_source() -> Path:
+    return get_app_dir() / "assets" / "windows_terminal_settings.json"
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    if not path.is_file():
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _terminal_profile_is_installed() -> InstalledState:
+    # No numeric "version" for a config file — either the live settings.json
+    # is byte-identical to what this app would install (a real, meaningful
+    # "installed" signal, confirmed via SHA256 rather than assuming
+    # presence-of-any-settings.json means "ours"), or it isn't, in which
+    # case Install Selected will write it fresh. No resolve_latest either:
+    # this app's own bundled copy IS "latest" by definition, same as
+    # Python/7-Zip/WinRAR's pinned-target pattern, just without a version
+    # number worth displaying.
+    source_hash = _file_sha256(_terminal_profile_source())
+    if source_hash is None:
+        return InstalledState(installed=False)
+    return InstalledState(installed=_file_sha256(_TERMINAL_PROFILE_TARGET) == source_hash)
+
+
+def _terminal_profile_install(ctx: InstallContext) -> bool:
+    log = get_logger()
+    source = _terminal_profile_source()
+    if not source.is_file():
+        log.fail("Bundled Windows Terminal settings file is missing from this install")
+        return False
+
+    if ctx.dry_run:
+        log.dry(f"Would back up {_TERMINAL_PROFILE_TARGET} (if present) and replace it with the bundled profile")
+        return True
+
+    target_dir = _TERMINAL_PROFILE_TARGET.parent
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.fail(f"Could not create Windows Terminal's settings folder ({target_dir}): {e}")
+        return False
+
+    if _TERMINAL_PROFILE_TARGET.is_file():
+        # Never overwrite a personal settings file without a way back —
+        # same backup-before-mutating-state discipline as PATH backups,
+        # scaled down to a single file since there's nothing else sharing
+        # this target to coordinate with.
+        backup_path = target_dir / f"settings.json.bak_{datetime.now():%Y%m%d_%H%M%S}"
+        try:
+            shutil.copyfile(_TERMINAL_PROFILE_TARGET, backup_path)
+            log.status(f"Backed up existing settings.json to {backup_path.name}")
+        except OSError as e:
+            log.fail(f"Could not back up existing settings.json, aborting to avoid data loss: {e}")
+            return False
+
+    try:
+        shutil.copyfile(source, _TERMINAL_PROFILE_TARGET)
+    except OSError as e:
+        log.fail(f"Could not write settings.json: {e}")
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # REGISTRY
 # ---------------------------------------------------------------------------
 
@@ -1440,6 +1524,7 @@ def build_components() -> List[Component]:
         # of a broader general-app-installer direction.
         Component("7zip", "7-Zip", "Archive Tools", _sevenzip_app_is_installed, _sevenzip_app_install, _sevenzip_app_resolve_latest, path_entry=_sevenzip_app_path_entry),
         Component("winrar", "WinRAR", "Archive Tools", _winrar_is_installed, _winrar_install, _winrar_resolve_latest, path_entry=_winrar_path_entry),
+        Component("terminal_profile", "Windows Terminal Profile (color-coded, per dev tool)", "Extras", _terminal_profile_is_installed, _terminal_profile_install),
     ]
 
     return components

@@ -1,0 +1,7 @@
+# windows_terminal_settings.json is compared byte-for-byte (SHA256) against
+# the live Windows Terminal settings.json at runtime to decide "installed"
+# vs "not installed" — git's default autocrlf on Windows would silently
+# convert its LF line endings to CRLF on checkout, breaking that
+# comparison for anyone who clones this repo. Treated as binary so git
+# never touches it.
+assets/windows_terminal_settings.json -text

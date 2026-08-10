@@ -150,6 +150,19 @@ all), so both are hand-pinned like Python rather than tracked live. WinRAR
 is shareware (nags for a license after the 40-day trial, never actually
 expires) — installing it here doesn't change that.
 
+**Extras** — a curated, color-coded Windows Terminal profile: one entry per
+Python version, a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
+by default, only useful if you have MSYS2), VS 2022 dev consoles, plus
+elevated variants of the shells. Bundled with this app
+(`assets/windows_terminal_settings.json`) rather than read from its
+personal OneDrive backup location, so it's fully self-contained and works
+on a fresh machine that hasn't synced that folder yet. Detected via SHA256
+comparison against the live `settings.json` — not just "does a settings
+file exist," but "does it match exactly what this app would install."
+Never overwrites an existing settings.json without backing it up first
+(`settings.json.bak_<timestamp>`, right next to the real file) — this is
+a personal config file, not something to silently discard.
+
 Behavior Notes
 --------------
 - Every component is re-verified after install using the same presence
