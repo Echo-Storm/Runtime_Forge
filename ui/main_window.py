@@ -365,6 +365,14 @@ class MainWindow(QMainWindow):
         self.path_backup_restore_btn.clicked.connect(self._on_restore_path_backup)
         path_bar.addWidget(self.path_backup_restore_btn)
 
+        self.path_backup_now_btn = QPushButton("Backup Now")
+        self.path_backup_now_btn.setToolTip(
+            "Snapshot PATH right now, without installing anything — installs only back it up "
+            "automatically when Dry Run is off"
+        )
+        self.path_backup_now_btn.clicked.connect(self._on_backup_path_now)
+        path_bar.addWidget(self.path_backup_now_btn)
+
         path_bar.addStretch()
 
         layout.addLayout(path_bar)
@@ -752,6 +760,20 @@ class MainWindow(QMainWindow):
         for backup in self._path_backups_cache:
             self.path_backup_combo.addItem(f"{backup.timestamp} — {backup.reason}")
         self.path_backup_restore_btn.setEnabled(True)
+
+    def _on_backup_path_now(self):
+        backup_path = path_backup.create_backup(self.app_dir, "manual backup")
+        self._refresh_path_backup_combo()
+        if backup_path:
+            QMessageBox.information(
+                self, "PATH Backed Up",
+                f"Current machine + user PATH saved to {backup_path.name}.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Backup Failed",
+                "Could not read the current machine PATH from the registry, so no backup was made.",
+            )
 
     def _on_restore_path_backup(self):
         idx = self.path_backup_combo.currentIndex()

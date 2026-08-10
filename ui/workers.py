@@ -139,6 +139,8 @@ class InstallWorker(QThread):
                 log.status(f"PATH backed up to {backup_path.name}")
             else:
                 log.status("Could not read current PATH to back it up - continuing anyway")
+        else:
+            log.dry("Skipping PATH backup (dry run — nothing will change)")
 
         installed_count = 0
         skipped_count = 0
