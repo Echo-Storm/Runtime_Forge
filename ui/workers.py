@@ -1,5 +1,5 @@
 """
-Background workers for AIO Runtime Installer.
+Background workers for Runtime Forge.
 
 ScanWorker runs every component's presence/version check off the UI thread
 (registry reads are cheap but version-resolver calls hit the network, and

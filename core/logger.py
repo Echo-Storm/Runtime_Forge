@@ -17,7 +17,7 @@ from typing import Callable, List
 class Logger:
     def __init__(self, app_dir: Path):
         self.app_dir = app_dir
-        self.log_file = app_dir / f"AIORuntimeInstaller_Log_{datetime.datetime.now():%Y%m%d_%H%M}.txt"
+        self.log_file = app_dir / f"RuntimeForge_Log_{datetime.datetime.now():%Y%m%d_%H%M}.txt"
         self._listeners: List[Callable[[str], None]] = []
         # ScanWorker's parallelized version lookups are the first callers
         # that can log concurrently (each hits this on its own
@@ -77,7 +77,7 @@ class Logger:
         """Keep only the 10 most recent run logs, same as the PS1's cleanup step."""
         try:
             logs = sorted(
-                self.app_dir.glob("AIORuntimeInstaller_Log_*.txt"),
+                self.app_dir.glob("RuntimeForge_Log_*.txt"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )

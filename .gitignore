@@ -3,8 +3,8 @@ __pycache__/
 venv/
 .venv/
 *.log
-AIORuntimeInstaller_Log_*.txt
-AIORuntimeInstaller.ini
+RuntimeForge_Log_*.txt
+RuntimeForge.ini
 build/
 dist/
 dist_installer/

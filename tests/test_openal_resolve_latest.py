@@ -47,7 +47,7 @@ try:
     try:
         probe = requests.get(
             "https://api.github.com/repos/kcat/openal-soft/releases/latest",
-            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
         )
         github_api_available = probe.status_code == 200
     except Exception:

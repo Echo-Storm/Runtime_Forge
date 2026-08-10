@@ -56,7 +56,7 @@ def download(
     log.status(f"Downloading {filename}...")
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "AIO-Runtime-Installer"}) as resp:
+            with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "Runtime-Forge"}) as resp:
                 resp.raise_for_status()
                 total = int(resp.headers.get("Content-Length", 0)) or None
                 downloaded = 0

@@ -385,7 +385,7 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
     # The key's only real job is being present for old installers that
     # check for it, so guarantee it directly rather than depend on that.
     if checks.create_reg_marker_key("HKLM", _OPENAL_LEGACY_REG_PATHS[0], {
-        "InstalledBy": "AIO Runtime Installer (OpenAL Soft runtime underneath)",
+        "InstalledBy": "Runtime Forge (OpenAL Soft runtime underneath)",
     }):
         return True
 
@@ -599,7 +599,7 @@ def _net_resolve_latest(nd: _NetDef) -> Optional[LatestInfo]:
     log = get_logger()
     version = _NET_FALLBACK_VERSIONS[nd.ver]
     try:
-        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         for channel in resp.json().get("releases-index", []):
             if channel.get("channel-version") == nd.ver:
@@ -645,7 +645,7 @@ def _net_sdk_resolve_latest(sd: _NetSdkDef) -> LatestInfo:
     log = get_logger()
     version = _NET_SDK_FALLBACK_VERSIONS[sd.ver]
     try:
-        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         for channel in resp.json().get("releases-index", []):
             if channel.get("channel-version") == sd.ver:
@@ -734,7 +734,7 @@ _VULKAN_FALLBACK_VERSION = "1.4.328.1"
 def _vulkan_resolve_latest() -> Optional[LatestInfo]:
     log = get_logger()
     try:
-        resp = requests.get("https://vulkan.lunarg.com/sdk/latest/windows.json", headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15)
+        resp = requests.get("https://vulkan.lunarg.com/sdk/latest/windows.json", headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         version = resp.json()["windows"]
     except Exception as e:
@@ -1022,7 +1022,7 @@ def _vscode_resolve_latest() -> LatestInfo:
     try:
         resp = requests.get(
             "https://update.code.visualstudio.com/api/update/win32-x64-user/stable/latest",
-            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1115,7 +1115,7 @@ def _llvm_resolve_latest() -> LatestInfo:
     try:
         resp = requests.get(
             "https://api.github.com/repos/llvm/llvm-project/releases/latest",
-            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
         )
         resp.raise_for_status()
         rel = resp.json()
@@ -1327,7 +1327,7 @@ def _jq_resolve_latest() -> LatestInfo:
     try:
         resp = requests.get(
             "https://api.github.com/repos/jqlang/jq/releases/latest",
-            headers={"User-Agent": "AIO-Runtime-Installer"}, timeout=15,
+            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
         )
         resp.raise_for_status()
         rel = resp.json()

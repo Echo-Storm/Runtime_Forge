@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AIO Runtime Installer - Entry point
+Runtime Forge - Entry point
 """
 
 import sys
@@ -29,7 +29,7 @@ def main():
     )
 
     app = QApplication(sys.argv)
-    app.setApplicationName("AIO Runtime Installer")
+    app.setApplicationName("Runtime Forge")
     app.setOrganizationName("EchoStorm")
 
     icon_path = os.path.join(app_dir, "assets", "icon.ico")

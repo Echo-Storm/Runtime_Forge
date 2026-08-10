@@ -19,7 +19,7 @@ import requests
 from core.logger import get_logger
 
 REQUEST_TIMEOUT = 15
-_HEADERS = {"User-Agent": "AIO-Runtime-Installer"}
+_HEADERS = {"User-Agent": "Runtime-Forge"}
 
 _VERSION_RUN = re.compile(r"\d+(?:[.+]\d+)*")
 

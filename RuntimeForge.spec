@@ -1,18 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for AIO Runtime Installer — onedir (folder) build.
+# PyInstaller spec for Runtime Forge — onedir (folder) build.
 #
 # Build with:
-#   venv\Scripts\pyinstaller.exe AIORuntimeInstaller.spec --clean
+#   venv\Scripts\pyinstaller.exe RuntimeForge.spec --clean
 #
-# Output lands in dist\AIORuntimeInstaller\ — copy that whole folder to
+# Output lands in dist\RuntimeForge\ — copy that whole folder to
 # distribute. uac_admin=True embeds a manifest that makes Windows prompt for
 # elevation automatically on launch (replaces the PS1 original's separate
 # RUN_ME.bat elevation wrapper). Settings/log files are written next to the
 # exe (see core/paths.py) — the folder is fully self-contained and portable.
 
 a = Analysis(
-    ['aio_runtime_installer.py'],
+    ['runtime_forge.py'],
     pathex=[],
     binaries=[],
     # Copies the whole assets/ folder next to the built exe (get_app_dir()
@@ -35,7 +35,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='AIORuntimeInstaller',
+    name='RuntimeForge',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -57,5 +57,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='AIORuntimeInstaller',
+    name='RuntimeForge',
 )

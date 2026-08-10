@@ -1,6 +1,6 @@
-<p align="center"><img src="assets/banner.png" alt="AIO Runtime Installer Banner"></p>
+<p align="center"><img src="assets/banner.png" alt="Runtime Forge Banner"></p>
 
-AIO Runtime Installer
+Runtime Forge
 ======================
 
 <p align="center">
@@ -27,7 +27,7 @@ Author: XechostormX
 
 Screenshot
 ----------
-<p align="center"><img src="assets/screenshot.png" alt="AIO Runtime Installer main window — a scan in progress showing installed/outdated/missing components across .NET SDK, Java, and Python"></p>
+<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a scan in progress showing installed/outdated/missing components across .NET SDK, Java, and Python"></p>
 
 What's different from the PowerShell version
 ----------------------------------------------
@@ -94,7 +94,7 @@ Running from source
 ```
 python -m venv venv
 venv\Scripts\pip install -r requirements.txt
-venv\Scripts\python aio_runtime_installer.py
+venv\Scripts\python runtime_forge.py
 ```
 Real installs need admin rights (most write to `HKLM`, `Program Files`, or
 `System32`) — launch an elevated terminal first, or build the exe (below),
@@ -105,24 +105,24 @@ Building the .exe
 ------------------
 ```
 venv\Scripts\pip install pyinstaller
-venv\Scripts\pyinstaller.exe AIORuntimeInstaller.spec --clean
+venv\Scripts\pyinstaller.exe RuntimeForge.spec --clean
 ```
-Output lands in `dist\AIORuntimeInstaller\` — copy the whole folder to
-distribute. It's portable: settings (`AIORuntimeInstaller.ini`) and log
+Output lands in `dist\RuntimeForge\` — copy the whole folder to
+distribute. It's portable: settings (`RuntimeForge.ini`) and log
 files are written next to the exe, nothing touches the registry except the
 components you choose to install.
 
 Building the Windows installer
 -------------------------------
-The `dist\AIORuntimeInstaller\` folder above is portable but has no Start
-Menu entry and no uninstaller. `installer\AIORuntimeInstaller.iss` (an
+The `dist\RuntimeForge\` folder above is portable but has no Start
+Menu entry and no uninstaller. `installer\RuntimeForge.iss` (an
 [Inno Setup](https://jrsoftware.org/isinfo.php) script) wraps it into a real
 installer — Program Files install, Start Menu shortcut, uninstaller. Build
 the `dist\` folder first (above), then:
 ```
-"<path to>\ISCC.exe" installer\AIORuntimeInstaller.iss
+"<path to>\ISCC.exe" installer\RuntimeForge.iss
 ```
-Output lands in `dist_installer\AIORuntimeInstaller-Setup-<version>.exe`
+Output lands in `dist_installer\RuntimeForge-Setup-<version>.exe`
 (gitignored — the `.iss` script is what's tracked, not the built installer
 binary). The installer requires admin rights, same as the app itself
 already does on every launch via its embedded manifest — this is a
@@ -217,5 +217,9 @@ Behavior Notes
 - `temp_installers\` is created next to the exe during a real install and
   removed afterward; Dry Run touches nothing on disk or the network beyond
   logging what it would have done.
-- Log files (`AIORuntimeInstaller_Log_*.txt`) are kept next to the exe,
+- Log files (`RuntimeForge_Log_*.txt`) are kept next to the exe,
   newest 10 retained.
+
+Support
+-------
+If this is useful, a Ko-fi helps a lot: [ko-fi.com/xechostormx](https://ko-fi.com/xechostormx) ♥

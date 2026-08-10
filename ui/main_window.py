@@ -1,5 +1,5 @@
 """
-Main window for AIO Runtime Installer.
+Main window for Runtime Forge.
 Steel/blue dark theme.
 """
 
@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
     QTextEdit, QSizePolicy, QAbstractItemView, QComboBox, QInputDialog,
     QFileDialog,
 )
-from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QSettings, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices
 
 from core import path_backup, profiles
 from core.definitions import Component, InstalledState, build_components
@@ -199,6 +199,8 @@ COLOR_FAILED = "#d56b6b"
 COLOR_SKIPPED = "#8a8f96"
 COLOR_PATH_WARNING = "#e0954a"
 
+KOFI_URL = "https://ko-fi.com/xechostormx"
+
 
 def _is_admin() -> bool:
     try:
@@ -208,7 +210,7 @@ def _is_admin() -> bool:
 
 
 class MainWindow(QMainWindow):
-    APP_NAME = "AIO Runtime Installer"
+    APP_NAME = "Runtime Forge"
     APP_VERSION = "0.1.0"
 
     def __init__(self):
@@ -239,7 +241,7 @@ class MainWindow(QMainWindow):
         self._initial_scan_done = False
         self._path_backups_cache: List[path_backup.PathBackup] = []
 
-        settings_path = str(self.app_dir / "AIORuntimeInstaller.ini")
+        settings_path = str(self.app_dir / "RuntimeForge.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
 
         self.setStyleSheet(STYLE_SHEET)
@@ -265,7 +267,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        title = QLabel("AIO RUNTIME INSTALLER")
+        title = QLabel("RUNTIME FORGE")
         title.setObjectName("titleLabel")
         layout.addWidget(title)
 
@@ -433,6 +435,27 @@ class MainWindow(QMainWindow):
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+
+        # Ko-fi donate link — permanent widget, far right, same unobtrusive
+        # placement as the sibling apps (Echo Audio Converter, TorBox Manager).
+        kofi_btn = QPushButton("♥  donate")
+        kofi_btn.setFlat(True)
+        kofi_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        kofi_btn.setToolTip("Support development on Ko-fi")
+        kofi_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {COLOR_NOT_INSTALLED};
+                font-size: 8pt;
+                border: none;
+                background: transparent;
+                padding: 0 6px;
+            }}
+            QPushButton:hover {{
+                color: {COLOR_INSTALLING};
+            }}
+        """)
+        kofi_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
+        self.status_bar.addPermanentWidget(kofi_btn)
 
         self.resize(980, 720)
 

@@ -181,7 +181,7 @@ def ensure_first_run_backup(app_dir: Path) -> None:
     the time someone notices a problem it's too late to capture that."""
     if list_backups(app_dir):
         return
-    create_backup(app_dir, "first launch of AIO Runtime Installer")
+    create_backup(app_dir, "first launch of Runtime Forge")
 
 
 def add_directory_to_path(dir_path: Path) -> bool:
