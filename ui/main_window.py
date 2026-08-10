@@ -353,10 +353,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_section(title: str, content: QHBoxLayout) -> QFrame:
-        """Wraps a row of controls in a bordered, labeled panel so related
-        controls (bulk-select, profiles, PATH backups) read as distinct
-        sections instead of a flat stack of same-weight rows."""
+    def _make_section(title: str, content: QVBoxLayout) -> QFrame:
+        """Wraps a column of controls in a bordered, labeled panel so
+        related controls (bulk-select, profiles, PATH backups) read as
+        distinct sections instead of a flat stack of same-weight rows."""
         frame = QFrame()
         frame.setObjectName("sectionPanel")
         inner = QVBoxLayout(frame)
@@ -367,6 +367,17 @@ class MainWindow(QMainWindow):
         inner.addWidget(label)
         inner.addLayout(content)
         return frame
+
+    @staticmethod
+    def _button_row(*widgets) -> QHBoxLayout:
+        """A row of same-weight controls (e.g. Save As / Update) - used to
+        pair short buttons side by side in the narrow left sidebar instead
+        of each claiming its own full-width row."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for w in widgets:
+            row.addWidget(w)
+        return row
 
     def _setup_ui(self):
         self.setWindowTitle(f"{self.APP_NAME} v{self.APP_VERSION}")
@@ -395,97 +406,105 @@ class MainWindow(QMainWindow):
             warn.setWordWrap(True)
             layout.addWidget(warn)
 
-        # --- Toolbar ---
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(10)
+        # === Left sidebar (controls) / right side (the component tree) ===
+        # The components are the actual point of this app - they were
+        # previously squeezed under three full-width control panels,
+        # leaving the tree a small fraction of the window. Controls now
+        # live in a fixed-width left sidebar (same shape as the sibling
+        # apps' own left-panel convention - see Echo Audio Converter's
+        # `leftPanel`), freeing the right side entirely for the tree.
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(12)
+
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(12)
+
+        # --- Selection ---
+        selection_col = QVBoxLayout()
+        selection_col.setSpacing(8)
 
         self.select_all_btn = QPushButton("Select All")
         self.select_all_btn.clicked.connect(self._on_select_all)
-        toolbar.addWidget(self.select_all_btn)
 
         self.select_none_btn = QPushButton("Select None")
         self.select_none_btn.clicked.connect(self._on_select_none)
-        toolbar.addWidget(self.select_none_btn)
+
+        selection_col.addLayout(self._button_row(self.select_all_btn, self.select_none_btn))
 
         self.select_missing_btn = QPushButton("Select Missing/Outdated")
         self.select_missing_btn.setToolTip("Check everything not installed, plus anything with an update available")
         self.select_missing_btn.clicked.connect(self._on_select_not_installed)
-        toolbar.addWidget(self.select_missing_btn)
+        selection_col.addWidget(self.select_missing_btn)
 
         self.rescan_btn = QPushButton("Rescan")
         self.rescan_btn.clicked.connect(self._start_scan)
-        toolbar.addWidget(self.rescan_btn)
-
-        toolbar.addStretch()
+        selection_col.addWidget(self.rescan_btn)
 
         self.dry_run_checkbox = QCheckBox("Dry Run")
         self.dry_run_checkbox.setToolTip("Preview every action (including what it would download) without installing or writing anything")
-        toolbar.addWidget(self.dry_run_checkbox)
+        selection_col.addWidget(self.dry_run_checkbox)
 
-        layout.addWidget(self._make_section("SELECTION", toolbar))
+        left_panel.addWidget(self._make_section("SELECTION", selection_col))
 
         # --- Profiles ---
-        profile_bar = QHBoxLayout()
-        profile_bar.setSpacing(10)
+        profile_col = QVBoxLayout()
+        profile_col.setSpacing(8)
 
         profile_field_label = QLabel("Active:")
         profile_field_label.setObjectName("fieldLabel")
-        profile_bar.addWidget(profile_field_label)
+        profile_col.addWidget(profile_field_label)
 
         self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(220)
+        self.profile_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.profile_combo.setToolTip("A saved selection preset — pick one to check exactly those components")
         self.profile_combo.currentIndexChanged.connect(self._on_profile_combo_changed)
-        profile_bar.addWidget(self.profile_combo)
+        profile_col.addWidget(self.profile_combo)
 
         self.profile_save_as_btn = QPushButton("Save As...")
         self.profile_save_as_btn.setToolTip("Save the current checkbox selection as a new named profile")
         self.profile_save_as_btn.clicked.connect(self._on_save_profile_as)
-        profile_bar.addWidget(self.profile_save_as_btn)
 
         self.profile_update_btn = QPushButton("Update")
         self.profile_update_btn.setToolTip("Overwrite the selected profile with the current checkbox selection")
         self.profile_update_btn.clicked.connect(self._on_update_profile)
-        profile_bar.addWidget(self.profile_update_btn)
+
+        profile_col.addLayout(self._button_row(self.profile_save_as_btn, self.profile_update_btn))
 
         self.profile_delete_btn = QPushButton("Delete")
         self.profile_delete_btn.clicked.connect(self._on_delete_profile)
-        profile_bar.addWidget(self.profile_delete_btn)
-
-        profile_bar.addStretch()
+        profile_col.addWidget(self.profile_delete_btn)
 
         self.profile_export_btn = QPushButton("Export...")
         self.profile_export_btn.setToolTip("Save the selected profile to a file — carry it to another machine")
         self.profile_export_btn.clicked.connect(self._on_export_profile)
-        profile_bar.addWidget(self.profile_export_btn)
 
         self.profile_import_btn = QPushButton("Import...")
         self.profile_import_btn.setToolTip("Load a profile file exported from another machine")
         self.profile_import_btn.clicked.connect(self._on_import_profile)
-        profile_bar.addWidget(self.profile_import_btn)
 
-        layout.addWidget(self._make_section("PROFILES", profile_bar))
+        profile_col.addLayout(self._button_row(self.profile_export_btn, self.profile_import_btn))
+
+        left_panel.addWidget(self._make_section("PROFILES", profile_col))
 
         # --- PATH Backups ---
-        path_bar = QHBoxLayout()
-        path_bar.setSpacing(10)
+        path_col = QVBoxLayout()
+        path_col.setSpacing(8)
 
         path_field_label = QLabel("Snapshot:")
         path_field_label.setObjectName("fieldLabel")
-        path_bar.addWidget(path_field_label)
+        path_col.addWidget(path_field_label)
 
         self.path_backup_combo = QComboBox()
-        self.path_backup_combo.setMinimumWidth(320)
+        self.path_backup_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.path_backup_combo.setToolTip(
             "One snapshot per real install run — a safety net in case PATH ever gets mangled, "
             "separate from each install's own \"set PATH correctly\" flags"
         )
-        path_bar.addWidget(self.path_backup_combo)
+        path_col.addWidget(self.path_backup_combo)
 
         self.path_backup_restore_btn = QPushButton("Restore...")
         self.path_backup_restore_btn.setToolTip("Preview and optionally roll PATH back to this snapshot")
         self.path_backup_restore_btn.clicked.connect(self._on_restore_path_backup)
-        path_bar.addWidget(self.path_backup_restore_btn)
 
         self.path_backup_now_btn = QPushButton("Backup Now")
         self.path_backup_now_btn.setToolTip(
@@ -493,13 +512,23 @@ class MainWindow(QMainWindow):
             "automatically when Dry Run is off"
         )
         self.path_backup_now_btn.clicked.connect(self._on_backup_path_now)
-        path_bar.addWidget(self.path_backup_now_btn)
 
-        path_bar.addStretch()
+        path_col.addLayout(self._button_row(self.path_backup_restore_btn, self.path_backup_now_btn))
 
-        layout.addWidget(self._make_section("PATH BACKUPS", path_bar))
+        left_panel.addWidget(self._make_section("PATH BACKUPS", path_col))
 
-        # --- Tree ---
+        left_panel.addStretch()
+
+        left_widget = QWidget()
+        left_widget.setObjectName("leftPanel")
+        left_widget.setLayout(left_panel)
+        left_widget.setFixedWidth(300)
+        content_layout.addWidget(left_widget)
+
+        # --- Right: the component tree - the actual point of the app ---
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(8)
+
         self.tree = QTreeWidget()
         self.tree.setColumnCount(4)
         self.tree.setHeaderLabels(["Component", "Status", "Installed Version", "Latest Version"])
@@ -511,14 +540,20 @@ class MainWindow(QMainWindow):
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tree.itemChanged.connect(self._on_tree_item_changed)
-        layout.addWidget(self.tree, stretch=3)
+        right_panel.addWidget(self.tree, stretch=3)
 
         # --- Log pane ---
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setFixedHeight(140)
         self.log_view.setPlaceholderText("Log output...")
-        layout.addWidget(self.log_view, stretch=1)
+        right_panel.addWidget(self.log_view, stretch=1)
+
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+        content_layout.addWidget(right_widget, stretch=1)
+
+        layout.addLayout(content_layout, stretch=1)
 
         # --- Bottom bar ---
         bottom_bar = QHBoxLayout()
@@ -576,11 +611,10 @@ class MainWindow(QMainWindow):
         kofi_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
         self.status_bar.addPermanentWidget(kofi_btn)
 
-        # A bit taller than before - the three grouped panels above the
-        # tree (SELECTION/PROFILES/PATH BACKUPS) take more vertical space
-        # than the old flat rows did, and the tree shouldn't shrink to
-        # compensate on a fresh first launch.
-        self.resize(1000, 800)
+        # Wider than tall now - the 300px control sidebar plus a properly
+        # roomy tree (the actual point of the app) needs width, not height,
+        # unlike the old top-to-bottom stacked layout.
+        self.resize(1180, 760)
 
     def _populate_tree(self):
         categories: dict[str, QTreeWidgetItem] = {}

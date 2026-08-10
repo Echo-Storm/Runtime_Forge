@@ -27,7 +27,7 @@ Author: XechostormX
 
 Screenshot
 ----------
-<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — grouped Selection, Profiles, and PATH Backups panels above a completed scan of the Core Runtimes"></p>
+<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a left sidebar with Selection, Profiles, and PATH Backups panels next to the component tree, which takes up most of the window"></p>
 
 What's different from the PowerShell version
 ----------------------------------------------
