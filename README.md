@@ -34,6 +34,18 @@ What's different from the PowerShell version
   before/after preview. A safety net for the rare case a batch of installs
   (or anything else) leaves PATH in a bad state — restoring itself takes a
   fresh backup first, so it's never a one-way door either.
+- **A "Basic" profile ships seeded on first run** — broad compatibility
+  coverage (Core Runtimes, all VC++ Redistributables, all .NET Runtimes),
+  deliberately not opinionated about dev tooling (Java/Python/Git/Node/
+  CMake/VS Code/PowerShell). Only seeds if you have zero profiles at all —
+  never overwrites or fights with anything you've built or renamed.
+- **Fast scans** — version lookups (GitHub/Adoptium/nodejs.org, ~7 of them)
+  run in parallel rather than one at a time; ~3.7s down to ~1s on a typical
+  scan. Presence checks stay sequential since they're already fast and, for
+  the install side, several installers here share Windows Installer's
+  single global lock — parallelizing *those* would risk real install
+  failures for a small time win, so only the genuinely parallelizable part
+  (independent network calls) is.
 - Fully Python install engine — no PowerShell dependency at runtime, aside
   from a single narrow read-only Authenticode signature check and the
   winget `.msixbundle` install step (Windows has no other ergonomic API for

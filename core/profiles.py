@@ -12,8 +12,18 @@ registry, the whole folder is what you'd copy to bring profiles along.
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional
+
+# A general "make sure this Windows machine can run old and new software"
+# baseline — broad compatibility/runtime coverage, deliberately excluding
+# role-specific dev tooling (Java, Python, Git, Node, CMake, VS Code,
+# PowerShell). There's no universal answer for which of those any given
+# person wants, but VC++/.NET/DirectX/OpenAL/WebView2 coverage is close to
+# always-useful regardless of what the machine is actually for.
+DEFAULT_PROFILE_NAME = "Basic"
+_DEFAULT_PROFILE_CATEGORIES = {"Core Runtimes", "VC++ Redistributables", ".NET Runtimes"}
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]')
 _RESERVED_NAMES = {
@@ -99,3 +109,22 @@ def export_profile(profile: Profile, dest_path: Path) -> bool:
         return True
     except OSError:
         return False
+
+
+def default_basic_profile(components: Iterable) -> Profile:
+    """Built from live Component objects (duck-typed: anything with .key
+    and .category), not a static list of key strings — stays correct
+    automatically if a component gets renamed or a category's membership
+    changes, instead of silently drifting out of sync with the registry."""
+    keys = [c.key for c in components if c.category in _DEFAULT_PROFILE_CATEGORIES]
+    return Profile(name=DEFAULT_PROFILE_NAME, component_keys=keys, created=datetime.now().isoformat(timespec="seconds"))
+
+
+def ensure_default_profile(app_dir: Path, components: Iterable) -> None:
+    """Seeds a "Basic" profile on first run only — if profiles/ already has
+    anything in it (including a user-renamed-away-from "Basic" one), this
+    does nothing. Never overwrites or competes with what someone's actually
+    built."""
+    if list_profiles(app_dir):
+        return
+    save_profile(app_dir, default_basic_profile(components))

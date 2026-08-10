@@ -16,6 +16,7 @@ never just "the installer's exit code looked fine."
 """
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum, auto
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -25,6 +26,8 @@ from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
 from core.paths import get_app_dir
 from core.version_resolvers import version_is_newer
+
+MAX_SCAN_WORKERS = 8
 
 
 class ScanWorker(QThread):
@@ -36,18 +39,42 @@ class ScanWorker(QThread):
         self.components = components
 
     def run(self):
+        # is_installed() checks are fast local ops (registry/file, or a
+        # short-timeout subprocess call) — kept sequential, in submission
+        # order, so results without a version concept show up immediately
+        # with no thread-pool overhead for a part that's already fast.
+        # resolve_latest() is the actual bottleneck: independent read-only
+        # HTTP calls to GitHub/Adoptium/nodejs.org with no shared resource
+        # between them to contend over — unlike installers (which share
+        # Windows Installer's single global lock), there's no correctness
+        # risk to running these concurrently, only a speed win.
+        states: dict[str, InstalledState] = {}
+        versioned_components = []
         for component in self.components:
             try:
                 state = component.is_installed()
             except Exception:
                 state = InstalledState(installed=False)
-            latest = None
-            if component.resolve_latest is not None:
+            states[component.key] = state
+            if component.resolve_latest is None:
+                self.component_scanned.emit(component.key, state, None)
+            else:
+                versioned_components.append(component)
+
+        if versioned_components:
+            def resolve(component):
                 try:
-                    latest = component.resolve_latest()
+                    return component.key, component.resolve_latest()
                 except Exception:
-                    latest = None
-            self.component_scanned.emit(component.key, state, latest)
+                    return component.key, None
+
+            worker_count = min(MAX_SCAN_WORKERS, len(versioned_components))
+            with ThreadPoolExecutor(max_workers=worker_count) as pool:
+                futures = [pool.submit(resolve, c) for c in versioned_components]
+                for future in as_completed(futures):
+                    key, latest = future.result()
+                    self.component_scanned.emit(key, states[key], latest)
+
         self.finished_scan.emit()
 
 

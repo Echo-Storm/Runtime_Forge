@@ -9,6 +9,7 @@ file stays free of Qt imports.
 """
 
 import datetime
+import threading
 from pathlib import Path
 from typing import Callable, List
 
@@ -18,10 +19,17 @@ class Logger:
         self.app_dir = app_dir
         self.log_file = app_dir / f"AIORuntimeInstaller_Log_{datetime.datetime.now():%Y%m%d_%H%M}.txt"
         self._listeners: List[Callable[[str], None]] = []
+        # ScanWorker's parallelized version lookups are the first callers
+        # that can log concurrently (each hits this on its own
+        # ThreadPoolExecutor thread when an API call falls back to its
+        # pinned version) — without a lock, concurrent appends to the log
+        # file could interleave into a garbled line.
+        self._lock = threading.Lock()
         self._prune_old_logs()
 
     def add_listener(self, fn: Callable[[str], None]) -> None:
-        self._listeners.append(fn)
+        with self._lock:
+            self._listeners.append(fn)
 
     def remove_listener(self, fn: Callable[[str], None]) -> None:
         # Callers (InstallWorker, one per run) must unsubscribe when done —
@@ -29,20 +37,22 @@ class Logger:
         # removed keeps firing (and keeps the dead worker object reachable)
         # for the rest of the process, one extra duplicate log line per
         # leaked listener on every subsequent run.
-        try:
-            self._listeners.remove(fn)
-        except ValueError:
-            pass
+        with self._lock:
+            try:
+                self._listeners.remove(fn)
+            except ValueError:
+                pass
 
     def _emit(self, line: str) -> None:
-        print(line)
-        try:
-            with open(self.log_file, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except OSError:
-            pass
-        for fn in self._listeners:
-            fn(line)
+        with self._lock:
+            print(line)
+            try:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
+                pass
+            for fn in self._listeners:
+                fn(line)
 
     def _log(self, msg: str) -> None:
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
