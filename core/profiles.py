@@ -49,7 +49,10 @@ class Profile:
 
 def profiles_dir(app_dir: Path) -> Path:
     d = app_dir / "profiles"
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # callers already handle a missing/unwritable dir gracefully
     return d
 
 

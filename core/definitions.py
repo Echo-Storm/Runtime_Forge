@@ -744,8 +744,13 @@ def _net_is_installed(nd: _NetDef) -> InstalledState:
     if match:
         return InstalledState(installed=True, version=match.name)
 
-    installed = checks.reg_key_exists("HKLM", f"{nd.reg}\\{nd.ver}")
-    return InstalledState(installed=installed, version=nd.ver if installed else None)
+    # nd.reg's InstalledVersions\...\sharedfx\<Name> key records each
+    # installed patch as a value NAME (e.g. "8.0.10"), not as a subkey —
+    # reg_key_exists() on f"{nd.reg}\\{nd.ver}" would look for a literal
+    # "8.0" subkey that this registration never creates, making it dead
+    # code. Enumerate value names by channel prefix instead.
+    exact = checks.reg_value_name_matches("HKLM", nd.reg, f"{nd.ver}.")
+    return InstalledState(installed=bool(exact), version=exact)
 
 
 _NET_RELEASES_INDEX_URL = "https://builds.dotnet.microsoft.com/dotnet/release-metadata/releases-index.json"
@@ -835,16 +840,26 @@ def _net_sdk_path_entry() -> Optional[Path]:
     return PROGRAM_FILES / "dotnet"
 
 
-def _net_sdk_uninstall_pattern(sd: _NetSdkDef) -> "re.Pattern[str]":
-    # Confirmed on a real machine: "Microsoft .NET SDK 10.0.303 (x64)" — a
-    # single, clean, unambiguous entry per channel (unlike the ASP.NET
-    # Core / Desktop runtimes, which register multiple overlapping entries
-    # — a plain Shared Framework, a "Targeting Pack" dev-only sibling, and
-    # sometimes a separate bootstrapper-bundle wrapper — with no reliable
-    # way to guarantee matching the right one first; runtimes are
-    # deliberately left without uninstall support for that reason, while
-    # the SDK's single-entry registration makes it safe here).
-    return re.compile(rf"Microsoft \.NET SDK {re.escape(sd.ver)}\.")
+def _net_sdk_uninstall(sd: _NetSdkDef, ctx: InstallContext) -> bool:
+    # Each installed SDK patch registers its own separate Uninstall entry
+    # (e.g. "Microsoft .NET SDK 8.0.403 (x64)" and "...8.0.404 (x64)"),
+    # and — unlike the runtimes — multiple patches within the same channel
+    # legitimately coexist side by side by design (that's the entire point
+    # of .NET SDK's side-by-side model: a global.json-pinned project can
+    # depend on an older patch after a newer one is added). A channel-only
+    # pattern like "Microsoft \.NET SDK 8\.0\." matches every one of them,
+    # and find_uninstall_command_by_display_name returns whichever entry
+    # the registry happens to enumerate first — not necessarily the one
+    # the user meant to remove. So the exact installed patch is resolved
+    # live (mirroring _net_sdk_is_installed's own disk check) and matched
+    # precisely here, never just by channel.
+    log = get_logger()
+    state = _net_sdk_is_installed(sd)
+    if not state.installed or not state.version:
+        log.fail(f".NET {sd.ver} SDK does not appear to be installed")
+        return False
+    pattern = re.compile(rf"Microsoft \.NET SDK {re.escape(state.version)}(?:\s|$)")
+    return _generic_registry_uninstall(pattern, f".NET {sd.ver} SDK {state.version}")(ctx)
 
 
 def _net_sdk_install(sd: _NetSdkDef, ctx: InstallContext) -> bool:
@@ -1692,7 +1707,7 @@ def build_components() -> List[Component]:
             lambda ctx, sd=sd: _net_sdk_install(sd, ctx),
             lambda sd=sd: _net_sdk_resolve_latest(sd),
             path_entry=_net_sdk_path_entry,
-            uninstall=_generic_registry_uninstall(_net_sdk_uninstall_pattern(sd), f".NET {sd.ver} SDK"),
+            uninstall=lambda ctx, sd=sd: _net_sdk_uninstall(sd, ctx),
         ))
 
     for jd in _JDK_DEFS:

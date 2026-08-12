@@ -664,6 +664,19 @@ class MainWindow(QMainWindow):
         Handles both the frozen exe (no separate script argument needed)
         and running from source (python.exe needs the script path passed
         as its own argument)."""
+        for worker in (self.install_worker, self.uninstall_worker, self.scan_worker):
+            if worker is not None and worker.isRunning():
+                # QApplication.quit() here would destroy a live QThread out
+                # from under a running install/uninstall/scan - exactly the
+                # crash/orphaned-subprocess risk closeEvent's own guards
+                # exist to prevent (see closeEvent above). Relaunching isn't
+                # urgent enough to justify that; just ask for the work to
+                # finish first.
+                QMessageBox.information(
+                    self, "Busy",
+                    "Wait for the current install/uninstall/scan to finish before relaunching as Administrator.",
+                )
+                return
         if getattr(sys, "frozen", False):
             exe = sys.executable
             params = ""
@@ -787,6 +800,13 @@ class MainWindow(QMainWindow):
     def _start_scan(self):
         self.rescan_btn.setEnabled(False)
         self.install_btn.setEnabled(False)
+        # _scan_results is cleared below and re-populated incrementally as
+        # ScanWorker's per-component signals arrive - clicking this mid-scan
+        # would read that partial state and treat every not-yet-scanned
+        # component as "not installed" (the _on_select_not_installed
+        # default), wrongly checking things that are actually already
+        # current.
+        self.select_missing_btn.setEnabled(False)
         self.summary_label.setText("Scanning installed components...")
         self._scan_results.clear()
         for key, item in self.tree_items.items():
@@ -836,6 +856,7 @@ class MainWindow(QMainWindow):
         self._initial_scan_done = True
         self.rescan_btn.setEnabled(True)
         self.install_btn.setEnabled(True)
+        self.select_missing_btn.setEnabled(True)
         not_installed = sum(1 for state, _ in self._scan_results.values() if not state.installed)
         updates_available = sum(1 for state, latest in self._scan_results.values() if self._has_update(state, latest))
 
@@ -934,6 +955,12 @@ class MainWindow(QMainWindow):
         self.uninstall_worker.start()
 
     def _on_uninstall_finished(self, key: str, success: bool):
+        # Captured from the worker that actually ran, not read live off the
+        # checkbox below - the user can toggle Dry Run while a real
+        # uninstall is still in flight, and reading it live here would then
+        # treat a real, completed removal as a no-op dry run and skip the
+        # re-verification/tree-update block entirely.
+        was_dry_run = self.uninstall_worker.dry_run if self.uninstall_worker else True
         self.uninstall_worker = None
         self.install_btn.setEnabled(True)
         self.rescan_btn.setEnabled(True)
@@ -948,7 +975,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Uninstall Failed", f"Could not uninstall {component.name} — check the log for details.")
             return
 
-        if self.dry_run_checkbox.isChecked():
+        if was_dry_run:
             self.status_bar.showMessage(f"Dry run: would have uninstalled {component.name}", 5000)
             return
 
@@ -1422,10 +1449,31 @@ class MainWindow(QMainWindow):
             item.setText(1, "Failed")
             item.setForeground(1, self._color(COLOR_FAILED))
 
+        # Keep _scan_results (what the context menu and Export Report read)
+        # in sync with what actually just happened - without this, a
+        # component installed this run shows no "Uninstall"/"Open Install
+        # Location" menu and Export Report still calls it "Not installed"
+        # until the next full Rescan, since only ScanWorker's results ever
+        # wrote into _scan_results before this.
+        component = self.component_by_key.get(key)
+        if component is not None and status in (ResultStatus.INSTALLED, ResultStatus.SKIPPED):
+            try:
+                state = component.is_installed()
+            except Exception:
+                state = InstalledState(installed=False)
+            previous_latest = self._scan_results.get(key, (None, None))[1]
+            self._scan_results[key] = (state, previous_latest)
+            item.setText(2, state.version or "-")
+
     def _on_log_line(self, line: str):
         self.log_view.append(line)
 
     def _on_all_finished(self, installed: int, skipped: int, failed: int):
+        # Same "use what the worker actually ran with" reasoning as
+        # _on_uninstall_finished above - reading the checkbox live here
+        # would miss refreshing the combo if Dry Run got toggled on after a
+        # real run (that already created a backup) started.
+        was_dry_run = self.install_worker.dry_run if self.install_worker else True
         self.install_worker = None
         self.install_btn.setEnabled(True)
         self.rescan_btn.setEnabled(True)
@@ -1433,7 +1481,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.status_bar.clearMessage()
         self.summary_label.setText(f"Done — Installed: {installed}  Skipped: {skipped}  Failed: {failed}")
-        if not self.dry_run_checkbox.isChecked():
+        if not was_dry_run:
             self._refresh_path_backup_combo()  # a real run just created a new one
 
         QMessageBox.information(

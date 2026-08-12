@@ -56,6 +56,28 @@ def reg_value_int(hive: str, subkey: str, name: str) -> Optional[int]:
         return None
 
 
+def reg_value_name_matches(hive: str, subkey: str, name_prefix: str) -> Optional[str]:
+    """Returns the first value NAME under subkey that starts with
+    name_prefix, or None. For registrations like .NET's
+    InstalledVersions\\<arch>\\sharedfx\\<Name>, where each installed patch
+    is recorded as a value name (e.g. "8.0.10") rather than a subkey —
+    reg_key_exists() would never match here since there's no such subkey
+    to open."""
+    try:
+        with winreg.OpenKey(_HIVES[hive], subkey) as key:
+            i = 0
+            while True:
+                try:
+                    value_name, _, _ = winreg.EnumValue(key, i)
+                except OSError:
+                    return None
+                i += 1
+                if value_name.startswith(name_prefix):
+                    return value_name
+    except OSError:
+        return None
+
+
 def file_exists(path: str) -> bool:
     return Path(path).is_file()
 
