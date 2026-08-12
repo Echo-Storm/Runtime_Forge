@@ -73,6 +73,16 @@ class Component:
     # so it has to be resolved fresh each time rather than computed once at
     # component-registry build time.
     path_entry: Optional[Callable[[], Optional[Path]]] = None
+    # None means "no safe uninstall path available" - not every component
+    # has one (DirectX has never shipped an uninstaller at all; OpenAL's
+    # install overlays a DLL with no backup of the original to restore;
+    # WebView2 and winget are shared system components other software can
+    # depend on, so removing them here would be a real footgun for
+    # something unrelated). Where present, this always re-derives the
+    # actual uninstall command from live registry data at call time rather
+    # than caching one - see _generic_registry_uninstall's docstring for
+    # why the command can't be trusted verbatim from the registry either.
+    uninstall: Optional[Callable[[InstallContext], bool]] = None
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
@@ -87,6 +97,139 @@ def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
         if target != dest_dir and dest_dir not in target.parents:
             raise ValueError(f"Unsafe zip entry path (would extract outside destination): {member}")
     zf.extractall(dest_dir)
+
+
+# ---------------------------------------------------------------------------
+# UNINSTALL infrastructure, shared across most components below
+# ---------------------------------------------------------------------------
+
+_MSI_GUID_RE = re.compile(r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}")
+_UNINSTALL_SUCCESS_CODES = {0, 3010, 1641, 1638}
+
+
+def _run_uninstall_command(args: List[str], name: str, ctx: InstallContext) -> bool:
+    log = get_logger()
+    if ctx.dry_run:
+        log.dry(f"Would uninstall {name}: {' '.join(args)}")
+        return True
+    log.status(f"Uninstalling {name}...")
+    try:
+        result = subprocess.run(args, timeout=300, creationflags=subprocess.CREATE_NO_WINDOW)
+        log.status(f"       Exit code: {result.returncode}")
+        return result.returncode in _UNINSTALL_SUCCESS_CODES
+    except (OSError, subprocess.SubprocessError) as e:
+        log.fail(f"Uninstall failed: {e}")
+        return False
+
+
+def _generic_registry_uninstall(pattern: "re.Pattern[str]", name: str) -> Callable[[InstallContext], bool]:
+    """Builds an uninstall closure that looks up the real uninstall command
+    from the registry at call time (never cached — trusting live system
+    state, exactly like every is_installed() check in this file already
+    does) and runs it silently.
+
+    Prefers QuietUninstallString outright when the installer registered
+    one — it's the vendor's own documented silent invocation, nothing to
+    guess. Otherwise falls back to extracting the MSI ProductCode GUID
+    from UninstallString and building a fresh "msiexec /x {GUID} /qn
+    /norestart" ourselves, rather than running UninstallString verbatim —
+    confirmed on a real machine that several MSI packages (7-Zip, Python's
+    own sub-features, several Temurin JDKs) register UninstallString with
+    the literal text "/I{GUID}" (the install/repair verb), which would
+    repair rather than remove if actually executed as written.
+    """
+    def _uninstall(ctx: InstallContext) -> bool:
+        log = get_logger()
+        cmd = checks.find_uninstall_command_by_display_name(pattern)
+        if cmd is None:
+            log.fail(f"No registry uninstall entry found for {name}")
+            return False
+
+        if cmd.quiet_command:
+            args = checks.parse_command_line(cmd.quiet_command)
+        else:
+            guid_match = _MSI_GUID_RE.search(cmd.raw_command or "")
+            if not guid_match:
+                log.fail(
+                    f"{name} has no QuietUninstallString and its UninstallString isn't "
+                    f"a recognizable MSI invocation — use Windows Settings > Apps to remove it instead"
+                )
+                return False
+            args = ["msiexec.exe", "/x", guid_match.group(0), "/qn", "/norestart"]
+
+        return _run_uninstall_command(args, name, ctx)
+
+    return _uninstall
+
+
+def _silent_flag_uninstall(pattern: "re.Pattern[str]", name: str, silent_args: List[str]) -> Callable[[InstallContext], bool]:
+    """For non-MSI installers with a known, documented silent-uninstall
+    convention (Inno Setup's /VERYSILENT, NSIS's /S) but no
+    QuietUninstallString registered to confirm it automatically. The
+    executable path still comes from live UninstallString/registry data —
+    only the silent flag is a hardcoded convention for that installer
+    technology, not guessed at the target."""
+    def _uninstall(ctx: InstallContext) -> bool:
+        log = get_logger()
+        cmd = checks.find_uninstall_command_by_display_name(pattern)
+        if cmd is None:
+            log.fail(f"No registry uninstall entry found for {name}")
+            return False
+        if cmd.quiet_command:
+            args = checks.parse_command_line(cmd.quiet_command)
+        elif cmd.raw_command:
+            # These UninstallString values are just a bare executable path
+            # with no arguments to parse out - confirmed on a real machine
+            # that WinRAR's is registered WITHOUT surrounding quotes
+            # despite containing a space ("C:\Program Files\WinRAR\
+            # uninstall.exe"), which CommandLineToArgvW (correct, general-
+            # purpose Windows command-line parsing, used elsewhere in this
+            # file) would ambiguously split into two separate tokens at
+            # that space with no way to know better. Since there's nothing
+            # else in the string to parse, just strip any surrounding
+            # quotes directly instead of argv-splitting it.
+            exe_path = cmd.raw_command.strip().strip('"')
+            if not exe_path:
+                log.fail(f"Could not parse the registered uninstall command for {name}")
+                return False
+            args = [exe_path, *silent_args]
+        else:
+            log.fail(f"{name} has no uninstall command registered")
+            return False
+        return _run_uninstall_command(args, name, ctx)
+    return _uninstall
+
+
+def _portable_binary_uninstall(exe_path: Path, version_file: Path, install_dir: Path, name: str) -> Callable[[InstallContext], bool]:
+    """For the handful of components that ship as a raw binary with no
+    installer at all (ninja, jq) and therefore never register with Windows
+    in the first place — nothing to look up in the registry, so uninstall
+    just means removing exactly what install() placed (the exe + its
+    self-authored VERSION.txt sidecar) and undoing the PATH entry this app
+    added on the way in."""
+    def _uninstall(ctx: InstallContext) -> bool:
+        log = get_logger()
+        if ctx.dry_run:
+            log.dry(f"Would delete {exe_path}, {version_file}, and remove {install_dir} from PATH")
+            return True
+        ok = True
+        for f in (exe_path, version_file):
+            try:
+                f.unlink(missing_ok=True)
+            except OSError as e:
+                log.fail(f"Could not remove {f}: {e}")
+                ok = False
+        if not path_backup.remove_directory_from_path(install_dir):
+            log.status(f"WARNING: could not remove {install_dir} from PATH - you may need to remove it manually")
+        try:
+            if install_dir.is_dir() and not any(install_dir.iterdir()):
+                install_dir.rmdir()
+        except OSError:
+            pass
+        if ok:
+            log.success(f"{name} uninstalled")
+        return ok
+    return _uninstall
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +371,29 @@ def _netfx35_install(ctx: InstallContext) -> bool:
     try:
         result = subprocess.run(
             ["dism.exe", "/online", "/enable-feature", "/featurename:NetFx3", "/All", "/NoRestart"],
+            capture_output=True, text=True, timeout=600,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return result.returncode in (0, 3010)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.fail(f"Failed: {e}")
+        return False
+
+
+def _netfx35_uninstall(ctx: InstallContext) -> bool:
+    # A Windows optional feature toggle, not a standalone installed
+    # program — "uninstall" here means disabling it via the same dism.exe
+    # mechanism install() used to enable it, fully reversible with a
+    # single click of Install again afterward. Unlike WebView2 (a shared
+    # runtime other running software actively calls into), disabling an
+    # unused Windows capability carries much less real-world risk.
+    log = get_logger()
+    if ctx.dry_run:
+        log.dry("Would disable NetFx3 Windows feature via dism.exe")
+        return True
+    try:
+        result = subprocess.run(
+            ["dism.exe", "/online", "/disable-feature", "/featurename:NetFx3", "/NoRestart"],
             capture_output=True, text=True, timeout=600,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
@@ -669,6 +835,18 @@ def _net_sdk_path_entry() -> Optional[Path]:
     return PROGRAM_FILES / "dotnet"
 
 
+def _net_sdk_uninstall_pattern(sd: _NetSdkDef) -> "re.Pattern[str]":
+    # Confirmed on a real machine: "Microsoft .NET SDK 10.0.303 (x64)" — a
+    # single, clean, unambiguous entry per channel (unlike the ASP.NET
+    # Core / Desktop runtimes, which register multiple overlapping entries
+    # — a plain Shared Framework, a "Targeting Pack" dev-only sibling, and
+    # sometimes a separate bootstrapper-bundle wrapper — with no reliable
+    # way to guarantee matching the right one first; runtimes are
+    # deliberately left without uninstall support for that reason, while
+    # the SDK's single-entry registration makes it safe here).
+    return re.compile(rf"Microsoft \.NET SDK {re.escape(sd.ver)}\.")
+
+
 def _net_sdk_install(sd: _NetSdkDef, ctx: InstallContext) -> bool:
     latest = _net_sdk_resolve_latest(sd)
     file = download(latest.url, ctx.temp_dir, latest.filename, f".NET {sd.ver} SDK {latest.version}", ctx.dry_run, ctx.progress_cb)
@@ -713,6 +891,18 @@ def _jdk_path_entry(jd: _JdkDef) -> Optional[Path]:
 
 def _jdk_resolve_latest(jd: _JdkDef) -> Optional[LatestInfo]:
     return get_latest_adoptium(jd.feature_version, jd.fallback_version)
+
+
+def _jdk_uninstall_pattern(jd: _JdkDef) -> "re.Pattern[str]":
+    # Confirmed on a real machine: Temurin's own MSI naming is NOT uniform
+    # across major versions — 17/21 register as "...Hotspot 21.0.12+8
+    # (x64)" (dotted, JEP-223 scheme) while 8 registers as "...Hotspot
+    # 8u502-b07 (x64)" (the legacy 8u<update>-b<build> scheme, since Java 8
+    # never adopted the dotted versioning). A single dotted-version pattern
+    # would silently never match JDK 8's real entry.
+    if jd.feature_version == 8:
+        return re.compile(r"Eclipse Temurin JDK with Hotspot 8u")
+    return re.compile(rf"Eclipse Temurin JDK with Hotspot {jd.feature_version}\.")
 
 
 def _jdk_install(jd: _JdkDef, ctx: InstallContext) -> bool:
@@ -1473,7 +1663,7 @@ def _terminal_profile_install(ctx: InstallContext) -> bool:
 def build_components() -> List[Component]:
     components: List[Component] = [
         Component("winget", "winget (Windows Package Manager)", "Core Runtimes", _winget_is_installed, _winget_install, _winget_resolve_latest),
-        Component("netfx35", ".NET Framework 3.5", "Core Runtimes", _netfx35_is_installed, _netfx35_install),
+        Component("netfx35", ".NET Framework 3.5", "Core Runtimes", _netfx35_is_installed, _netfx35_install, uninstall=_netfx35_uninstall),
         Component("directx", "DirectX June 2010 (legacy DirectX 9.0c)", "Core Runtimes", _directx_is_installed, _directx_install),
         Component("openal", "OpenAL (Legacy compat + Soft runtime)", "Core Runtimes", _openal_is_installed, _openal_install, _openal_resolve_latest),
         Component("vulkan", "Vulkan Runtime", "Core Runtimes", _vulkan_is_installed, _vulkan_install, _vulkan_resolve_latest),
@@ -1502,6 +1692,7 @@ def build_components() -> List[Component]:
             lambda ctx, sd=sd: _net_sdk_install(sd, ctx),
             lambda sd=sd: _net_sdk_resolve_latest(sd),
             path_entry=_net_sdk_path_entry,
+            uninstall=_generic_registry_uninstall(_net_sdk_uninstall_pattern(sd), f".NET {sd.ver} SDK"),
         ))
 
     for jd in _JDK_DEFS:
@@ -1511,6 +1702,7 @@ def build_components() -> List[Component]:
             lambda ctx, jd=jd: _jdk_install(jd, ctx),
             lambda jd=jd: _jdk_resolve_latest(jd),
             path_entry=lambda jd=jd: _jdk_path_entry(jd),
+            uninstall=_generic_registry_uninstall(_jdk_uninstall_pattern(jd), jd.name),
         ))
 
     for py in _PY_DEFS:
@@ -1523,21 +1715,45 @@ def build_components() -> List[Component]:
         ))
 
     components += [
-        Component("pwsh", "PowerShell 7", "Dev Tools", _pwsh_is_installed, _pwsh_install, _pwsh_resolve_latest, path_entry=_pwsh_path_entry),
-        Component("git", "Git for Windows", "Dev Tools", _git_is_installed, _git_install, _git_resolve_latest, path_entry=_git_path_entry),
-        Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest, path_entry=_node_path_entry),
-        Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry),
+        Component("pwsh", "PowerShell 7", "Dev Tools", _pwsh_is_installed, _pwsh_install, _pwsh_resolve_latest, path_entry=_pwsh_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^PowerShell 7"), "PowerShell 7")),
+        Component("git", "Git for Windows", "Dev Tools", _git_is_installed, _git_install, _git_resolve_latest, path_entry=_git_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^Git$"), "Git for Windows")),
+        Component("node", "Node.js (LTS)", "Dev Tools", _node_is_installed, _node_install, _node_resolve_latest, path_entry=_node_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^Node\.js$"), "Node.js")),
+        Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^CMake$"), "CMake")),
+        # Visual Studio Code deliberately has no uninstall wired up: its
+        # installer defaults to a per-user install that registers under
+        # HKCU, not HKLM (confirmed by its absence from a real machine's
+        # HKLM Uninstall keys despite genuinely being installed) —
+        # find_uninstall_command_by_display_name only scans HKLM, so it
+        # would silently never find a per-user VS Code install anyway.
         Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install, _vscode_resolve_latest, path_entry=_vscode_path_entry),
-        Component("gh", "GitHub CLI", "Dev Tools", _gh_is_installed, _gh_install, _gh_resolve_latest, path_entry=_gh_path_entry),
-        Component("llvm", "LLVM/Clang", "Dev Tools", _llvm_is_installed, _llvm_install, _llvm_resolve_latest, path_entry=_llvm_path_entry),
-        Component("ninja", "Ninja", "Dev Tools", _ninja_is_installed, _ninja_install, _ninja_resolve_latest, path_entry=_ninja_path_entry),
-        Component("jq", "jq (JSON Processor)", "Dev Tools", _jq_is_installed, _jq_install, _jq_resolve_latest, path_entry=_jq_path_entry),
+        Component("gh", "GitHub CLI", "Dev Tools", _gh_is_installed, _gh_install, _gh_resolve_latest, path_entry=_gh_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^GitHub CLI$"), "GitHub CLI")),
+        # LLVM's own Uninstall.exe (NSIS-based) has no QuietUninstallString
+        # registered — /S is NSIS's well-documented silent-uninstall flag.
+        Component("llvm", "LLVM/Clang", "Dev Tools", _llvm_is_installed, _llvm_install, _llvm_resolve_latest, path_entry=_llvm_path_entry,
+                   uninstall=_silent_flag_uninstall(re.compile(r"^LLVM$"), "LLVM/Clang", ["/S"])),
+        Component("ninja", "Ninja", "Dev Tools", _ninja_is_installed, _ninja_install, _ninja_resolve_latest, path_entry=_ninja_path_entry,
+                   uninstall=_portable_binary_uninstall(_NINJA_EXE, _NINJA_VERSION_FILE, _NINJA_INSTALL_DIR, "Ninja")),
+        Component("jq", "jq (JSON Processor)", "Dev Tools", _jq_is_installed, _jq_install, _jq_resolve_latest, path_entry=_jq_path_entry,
+                   uninstall=_portable_binary_uninstall(_JQ_EXE, _JQ_VERSION_FILE, _JQ_INSTALL_DIR, "jq")),
         # A separate category, not folded into Dev Tools — these two are a
         # deliberately narrow exception to this app's dev/runtime-tool
         # scope ("tools like that are pretty much required"), not the start
         # of a broader general-app-installer direction.
-        Component("7zip", "7-Zip", "Archive Tools", _sevenzip_app_is_installed, _sevenzip_app_install, _sevenzip_app_resolve_latest, path_entry=_sevenzip_app_path_entry),
-        Component("winrar", "WinRAR", "Archive Tools", _winrar_is_installed, _winrar_install, _winrar_resolve_latest, path_entry=_winrar_path_entry),
+        # 7-Zip's own UninstallString is a real, confirmed quirk to watch
+        # for: it's MSI-based but registers the literal text "/I{GUID}"
+        # (install/repair) rather than "/X{GUID}" (remove) — exactly the
+        # case _generic_registry_uninstall's GUID-extraction exists for.
+        Component("7zip", "7-Zip", "Archive Tools", _sevenzip_app_is_installed, _sevenzip_app_install, _sevenzip_app_resolve_latest, path_entry=_sevenzip_app_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^7-Zip \d"), "7-Zip")),
+        # WinRAR's own uninstall.exe has no QuietUninstallString registered
+        # — /S is its documented silent-uninstall flag.
+        Component("winrar", "WinRAR", "Archive Tools", _winrar_is_installed, _winrar_install, _winrar_resolve_latest, path_entry=_winrar_path_entry,
+                   uninstall=_silent_flag_uninstall(re.compile(r"^WinRAR"), "WinRAR", ["/S"])),
         Component("terminal_profile", "Windows Terminal Profile (color-coded, per dev tool)", "Extras", _terminal_profile_is_installed, _terminal_profile_install),
     ]
 

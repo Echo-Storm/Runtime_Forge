@@ -14,7 +14,7 @@ import subprocess
 import winreg
 from ctypes import wintypes
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 _version_dll = ctypes.WinDLL("version.dll")
 _version_dll.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
@@ -194,6 +194,77 @@ def find_uninstall_entry_by_display_name(pattern: "re.Pattern[str]") -> Optional
         except OSError:
             continue
     return None
+
+
+class UninstallCommand:
+    def __init__(self, display_name: str, quiet_command: Optional[str], raw_command: Optional[str]):
+        self.display_name = display_name
+        self.quiet_command = quiet_command
+        self.raw_command = raw_command
+
+
+def find_uninstall_command_by_display_name(pattern: "re.Pattern[str]") -> Optional[UninstallCommand]:
+    """Same registry scan as find_uninstall_entry_by_display_name, but
+    returns the actual uninstall command(s) instead of just the version —
+    QuietUninstallString when the installer registered one (a vendor-
+    provided silent invocation, fully trusted as-is), UninstallString
+    otherwise (the caller may need to normalize it — confirmed on a real
+    machine that several MSI packages register UninstallString with the
+    literal text "/I{GUID}" — the install/repair verb, not "/X{GUID}" for
+    remove — so it can't be executed as-is and trusted to actually
+    uninstall anything)."""
+    for root in _UNINSTALL_ROOTS:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as uninstall_key:
+                i = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(uninstall_key, i)
+                    except OSError:
+                        break
+                    i += 1
+                    try:
+                        with winreg.OpenKey(uninstall_key, subkey_name) as entry:
+                            display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
+                            if pattern.search(display_name):
+                                quiet_command = None
+                                raw_command = None
+                                try:
+                                    quiet_command, _ = winreg.QueryValueEx(entry, "QuietUninstallString")
+                                except OSError:
+                                    pass
+                                try:
+                                    raw_command, _ = winreg.QueryValueEx(entry, "UninstallString")
+                                except OSError:
+                                    pass
+                                return UninstallCommand(display_name, quiet_command, raw_command)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return None
+
+
+_shell32 = ctypes.WinDLL("shell32.dll")
+_shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+_shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+
+
+def parse_command_line(command: str) -> List[str]:
+    """Parses a Windows command-line string (as found in registry
+    UninstallString/QuietUninstallString values) into an argv list, using
+    the same CommandLineToArgvW API Windows itself uses to parse a
+    process's own command line — far more reliable for paths containing
+    spaces and Windows-style backslash quoting than shlex, which assumes
+    POSIX shell escaping rules."""
+    argc = ctypes.c_int()
+    argv_ptr = _shell32.CommandLineToArgvW(command, ctypes.byref(argc))
+    if not argv_ptr:
+        return []
+    try:
+        return [argv_ptr[i] for i in range(argc.value)]
+    finally:
+        ctypes.windll.kernel32.LocalFree(argv_ptr)
 
 
 def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:

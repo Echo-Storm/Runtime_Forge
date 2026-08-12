@@ -259,3 +259,40 @@ class InstallWorker(QThread):
 
         log.status(f"Finished. Installed={installed_count} Skipped={skipped_count} Failed={failed_count}")
         self.all_finished.emit(installed_count, skipped_count, failed_count)
+
+
+class UninstallWorker(QThread):
+    """Runs a single component's uninstall() off the UI thread - real
+    uninstall commands (msiexec /x, a vendor uninstaller) can take a while
+    and would otherwise freeze the window, same reasoning as InstallWorker."""
+    log_line = pyqtSignal(str)
+    finished_uninstall = pyqtSignal(str, bool)  # key, success
+
+    def __init__(self, component: Component, dry_run: bool, parent=None):
+        super().__init__(parent)
+        self.component = component
+        self.dry_run = dry_run
+
+    def run(self):
+        log = get_logger()
+        # Same identity-capture discipline as InstallWorker.run() above —
+        # see its comment for why a fresh self.log_line.emit access here
+        # would silently break remove_listener().
+        listener = self.log_line.emit
+        log.add_listener(listener)
+        try:
+            app_dir = get_app_dir()
+            temp_dir = app_dir / "temp_installers"
+            if not self.dry_run:
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
+            ctx = InstallContext(temp_dir=temp_dir, dry_run=self.dry_run)
+            try:
+                ok = self.component.uninstall(ctx)
+            except Exception as e:
+                log.fail(f"{self.component.name} uninstall threw an exception: {e}")
+                ok = False
+
+            self.finished_uninstall.emit(self.component.key, ok)
+        finally:
+            log.remove_listener(listener)

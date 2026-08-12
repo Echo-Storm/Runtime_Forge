@@ -216,6 +216,32 @@ def add_directory_to_path(dir_path: Path) -> bool:
     return True
 
 
+def remove_directory_from_path(dir_path: Path) -> bool:
+    """The uninstall counterpart to add_directory_to_path() — removes
+    dir_path from the machine PATH if present (case-insensitively, trailing
+    slash ignored), leaving every other entry's order untouched. Idempotent:
+    if the directory isn't there, this is a no-op success, not a failure."""
+    machine_path, _ = read_current_path()
+    if not machine_path:
+        return False  # same "never trust an empty read" stance as add_directory_to_path()
+
+    target = str(dir_path).rstrip("\\/").lower()
+    entries = [e for e in machine_path.split(";") if e.strip()]
+    kept = [e for e in entries if e.strip().rstrip("\\/").lower() != target]
+    if len(kept) == len(entries):
+        return True  # wasn't there to begin with
+
+    new_path = ";".join(kept)
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
+    except OSError:
+        return False
+
+    _broadcast_environment_change()
+    return True
+
+
 def _broadcast_environment_change() -> None:
     HWND_BROADCAST = 0xFFFF
     WM_SETTINGCHANGE = 0x1A

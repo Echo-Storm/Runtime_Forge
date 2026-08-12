@@ -4,6 +4,8 @@ Steel/blue dark theme.
 """
 
 import ctypes
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -13,7 +15,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QCheckBox,
     QProgressBar, QMessageBox, QHeaderView, QFrame, QStatusBar,
     QTextEdit, QSizePolicy, QAbstractItemView, QComboBox, QInputDialog,
-    QFileDialog,
+    QFileDialog, QLineEdit, QMenu,
 )
 from PyQt6.QtCore import Qt, QSettings, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
@@ -23,7 +25,7 @@ from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_app_dir
 from core.version_resolvers import LatestInfo, version_is_newer
-from ui.workers import InstallWorker, ResultStatus, ScanWorker
+from ui.workers import InstallWorker, ResultStatus, ScanWorker, UninstallWorker
 
 STYLE_SHEET = """
 QMainWindow, QWidget {
@@ -72,7 +74,7 @@ QLabel#fieldLabel {
     color: #8a8f96;
 }
 
-QLabel#warnLabel {
+QFrame#warnLabel {
     color: #d5a05b;
     font-weight: bold;
     padding: 4px 10px;
@@ -315,6 +317,7 @@ class MainWindow(QMainWindow):
 
         self.scan_worker: Optional[ScanWorker] = None
         self.install_worker: Optional[InstallWorker] = None
+        self.uninstall_worker: Optional[UninstallWorker] = None
 
         self._profiles_cache: List[profiles.Profile] = []
         self._applying_profile = False
@@ -329,6 +332,7 @@ class MainWindow(QMainWindow):
         # this deliberately.
         self._initial_scan_done = False
         self._path_backups_cache: List[path_backup.PathBackup] = []
+        self._last_scan_time: Optional[datetime] = None
 
         settings_path = str(self.app_dir / "RuntimeForge.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
@@ -398,13 +402,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(title_rule)
 
         if not _is_admin():
-            warn = QLabel(
-                "Not running as administrator — most installs will fail. "
-                "Re-launch this app elevated (right-click → Run as administrator)."
-            )
-            warn.setObjectName("warnLabel")
-            warn.setWordWrap(True)
-            layout.addWidget(warn)
+            warn_frame = QFrame()
+            warn_frame.setObjectName("warnLabel")
+            warn_layout = QHBoxLayout(warn_frame)
+            warn_layout.setContentsMargins(10, 4, 10, 4)
+            warn_layout.setSpacing(12)
+
+            warn_text = QLabel("Not running as administrator — most installs will fail.")
+            warn_text.setWordWrap(True)
+            warn_layout.addWidget(warn_text, stretch=1)
+
+            relaunch_btn = QPushButton("Relaunch as Administrator")
+            relaunch_btn.setToolTip("Re-opens this app elevated via UAC, then closes this window")
+            relaunch_btn.clicked.connect(self._relaunch_elevated)
+            warn_layout.addWidget(relaunch_btn)
+
+            layout.addWidget(warn_frame)
 
         # === Left sidebar (controls) / right side (the component tree) ===
         # The components are the actual point of this app - they were
@@ -540,6 +553,32 @@ class MainWindow(QMainWindow):
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tree.itemChanged.connect(self._on_tree_item_changed)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+
+        tree_toolbar = QHBoxLayout()
+        tree_toolbar.setSpacing(8)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Filter components...")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.textChanged.connect(self._on_search_changed)
+        tree_toolbar.addWidget(self.search_box, stretch=1)
+
+        self.collapse_all_btn = QPushButton("Collapse All")
+        self.collapse_all_btn.clicked.connect(self.tree.collapseAll)
+        tree_toolbar.addWidget(self.collapse_all_btn)
+
+        self.expand_all_btn = QPushButton("Expand All")
+        self.expand_all_btn.clicked.connect(self.tree.expandAll)
+        tree_toolbar.addWidget(self.expand_all_btn)
+
+        self.export_report_btn = QPushButton("Export Report...")
+        self.export_report_btn.setToolTip("Save the full scan (every component's installed/latest version) to a text file")
+        self.export_report_btn.clicked.connect(self._on_export_report)
+        tree_toolbar.addWidget(self.export_report_btn)
+
+        right_panel.addLayout(tree_toolbar)
         right_panel.addWidget(self.tree, stretch=3)
 
         # --- Log pane ---
@@ -615,6 +654,30 @@ class MainWindow(QMainWindow):
         # roomy tree (the actual point of the app) needs width, not height,
         # unlike the old top-to-bottom stacked layout.
         self.resize(1180, 760)
+
+    def _relaunch_elevated(self):
+        """Re-launches this exact process elevated via a real UAC prompt,
+        then quits this instance - only quits if the prompt was actually
+        accepted (ShellExecuteW's return value is > 32 on success; a
+        cancelled/denied prompt returns an error code, in which case this
+        window is left running untouched rather than quitting for nothing).
+        Handles both the frozen exe (no separate script argument needed)
+        and running from source (python.exe needs the script path passed
+        as its own argument)."""
+        if getattr(sys, "frozen", False):
+            exe = sys.executable
+            params = ""
+        else:
+            exe = sys.executable
+            params = f'"{os.path.abspath(sys.argv[0])}"'
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+        if result > 32:
+            QApplication.quit()
+        else:
+            QMessageBox.information(
+                self, "Elevation Cancelled",
+                "The elevated relaunch was cancelled or failed - this window will stay open as-is.",
+            )
 
     def _populate_tree(self):
         categories: dict[str, QTreeWidgetItem] = {}
@@ -698,6 +761,23 @@ class MainWindow(QMainWindow):
                     self, "Finishing Up", "Waiting for the current scan to finish before closing.",
                 )
                 self.scan_worker.wait()
+        if self.uninstall_worker and self.uninstall_worker.isRunning():
+            reply = QMessageBox.question(
+                self, "Uninstall in Progress", "An uninstall is running. Quit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            # Same reasoning as install_worker above - can't be
+            # interrupted mid-command, so wait for real completion rather
+            # than risk destroying a live QThread.
+            if not self.uninstall_worker.wait(5000):
+                QMessageBox.information(
+                    self, "Finishing Up",
+                    "The current uninstall can't be interrupted - waiting for it to finish before closing.",
+                )
+                self.uninstall_worker.wait()
         event.accept()
 
     # ------------------------------------------------------------------
@@ -759,11 +839,201 @@ class MainWindow(QMainWindow):
         not_installed = sum(1 for state, _ in self._scan_results.values() if not state.installed)
         updates_available = sum(1 for state, latest in self._scan_results.values() if self._has_update(state, latest))
 
+        self._last_scan_time = datetime.now()
         msg = f"Scan complete — {not_installed} of {len(self.components)} not installed"
         if updates_available:
             msg += f", {updates_available} update(s) available"
+        msg += f"  ·  Last scanned: {self._last_scan_time.strftime('%b %d, %Y · %I:%M %p')}"
         self.summary_label.setText(msg)
         self.logger.status(f"Scan complete ({not_installed} not installed, {updates_available} updates available)")
+
+    # ------------------------------------------------------------------
+    # Tree display (search filter, context menu)
+    # ------------------------------------------------------------------
+
+    def _on_search_changed(self, text: str):
+        query = text.strip().lower()
+        for item in self.tree_items.values():
+            item.setHidden(bool(query) and query not in item.text(0).lower())
+
+        # A category row stays visible if any of its children matched (or
+        # if the search is empty) - otherwise a matching leaf would be
+        # orphaned under a hidden parent and never actually show up.
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            cat_item = root.child(i)
+            if not query:
+                cat_item.setHidden(False)
+                continue
+            any_visible_child = any(
+                not cat_item.child(j).isHidden() for j in range(cat_item.childCount())
+            )
+            cat_item.setHidden(not any_visible_child)
+
+        if query:
+            self.tree.expandAll()
+
+    def _on_tree_context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if item is None or item.parent() is None:
+            return  # empty space, or a category row (categories have no parent)
+
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        component = self.component_by_key.get(key)
+        if component is None:
+            return
+        result = self._scan_results.get(key)
+        state = result[0] if result else None
+
+        menu = QMenu(self)
+
+        if state is not None and state.installed and component.path_entry is not None:
+            open_action = menu.addAction("Open Install Location")
+            open_action.triggered.connect(lambda: self._open_install_location(component))
+
+        if state is not None and state.version:
+            copy_action = menu.addAction("Copy Version")
+            copy_action.triggered.connect(lambda: QApplication.clipboard().setText(state.version))
+
+        if state is not None and state.installed and component.uninstall is not None:
+            menu.addSeparator()
+            uninstall_action = menu.addAction("Uninstall...")
+            uninstall_action.triggered.connect(lambda: self._on_uninstall_component(component))
+
+        if menu.isEmpty():
+            return
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _on_uninstall_component(self, component: Component):
+        if self.install_worker is not None or self.uninstall_worker is not None or \
+                (self.scan_worker is not None and self.scan_worker.isRunning()):
+            QMessageBox.information(self, "Busy", "Wait for the current install/uninstall/scan to finish first.")
+            return
+
+        dry_run = self.dry_run_checkbox.isChecked()
+        reply = QMessageBox.question(
+            self, "Uninstall",
+            f"Uninstall {component.name}?\n\n" + (
+                "Dry Run is on — this will only log what would run, nothing will actually change."
+                if dry_run else
+                "This runs the real uninstall command for this component. It is not something "
+                "this app can undo afterward."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.install_btn.setEnabled(False)
+        self.rescan_btn.setEnabled(False)
+        self.status_bar.showMessage(f"Uninstalling {component.name}...")
+
+        self.uninstall_worker = UninstallWorker(component, dry_run, self)
+        self.uninstall_worker.log_line.connect(self._on_log_line)
+        self.uninstall_worker.finished_uninstall.connect(self._on_uninstall_finished)
+        self.uninstall_worker.start()
+
+    def _on_uninstall_finished(self, key: str, success: bool):
+        self.uninstall_worker = None
+        self.install_btn.setEnabled(True)
+        self.rescan_btn.setEnabled(True)
+        self.status_bar.clearMessage()
+
+        component = self.component_by_key.get(key)
+        item = self.tree_items.get(key)
+        if component is None or item is None:
+            return
+
+        if not success:
+            QMessageBox.warning(self, "Uninstall Failed", f"Could not uninstall {component.name} — check the log for details.")
+            return
+
+        if self.dry_run_checkbox.isChecked():
+            self.status_bar.showMessage(f"Dry run: would have uninstalled {component.name}", 5000)
+            return
+
+        # Re-verify against real system state, same discipline every
+        # install already follows — "uninstalled" means "confirmed no
+        # longer present," not just "the command exited 0."
+        try:
+            state = component.is_installed()
+        except Exception:
+            state = InstalledState(installed=False)
+
+        previous_latest = self._scan_results.get(key, (None, None))[1]
+        self._scan_results[key] = (state, previous_latest)
+
+        if state.installed:
+            item.setText(1, f"Installed (v{state.version})" if state.version else "Installed")
+            item.setForeground(1, self._color(COLOR_INSTALLED))
+            QMessageBox.information(
+                self, "Still Installed",
+                f"{component.name}'s uninstall command completed, but it still appears installed — "
+                f"it may need a restart to finish, or the removal wasn't fully complete.",
+            )
+        else:
+            item.setText(1, STATUS_NOT_INSTALLED)
+            item.setForeground(1, self._color(COLOR_NOT_INSTALLED))
+            item.setText(2, "-")
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            self.status_bar.showMessage(f"{component.name} uninstalled", 5000)
+
+    @staticmethod
+    def _open_install_location(component: Component):
+        if component.path_entry is None:
+            return
+        try:
+            entry = component.path_entry()
+        except Exception:
+            entry = None
+        if entry is None or not entry.is_dir():
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(entry)))
+
+    def _on_export_report(self):
+        if not self._scan_results:
+            QMessageBox.information(self, "No Scan Data", "Run a scan first before exporting a report.")
+            return
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Export System Report",
+            f"RuntimeForge_Report_{datetime.now():%Y%m%d_%H%M%S}.txt",
+            "Text Files (*.txt)",
+        )
+        if not dest:
+            return
+
+        lines = [
+            f"{self.APP_NAME} System Report",
+            f"Generated: {datetime.now().strftime('%b %d, %Y · %I:%M %p')}",
+            "",
+        ]
+        current_category = None
+        # Iterated in registry order, which is already grouped by category
+        # (build_components() adds every component of one category before
+        # moving to the next) - same grouping the tree itself relies on.
+        for component in self.components:
+            if component.category != current_category:
+                current_category = component.category
+                lines.append(f"== {current_category} ==")
+            result = self._scan_results.get(component.key)
+            if result is None:
+                lines.append(f"  {component.name}: not scanned")
+                continue
+            state, latest = result
+            if state.installed:
+                status = f"Installed (v{state.version})" if state.version else "Installed"
+                if self._has_update(state, latest):
+                    status += f" -> v{latest.version} available"
+            else:
+                status = "Not installed"
+            lines.append(f"  {component.name}: {status}")
+
+        try:
+            Path(dest).write_text("\n".join(lines), encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(self, "Export Failed", f"Could not write the report: {e}")
+            return
+        self.status_bar.showMessage(f"Report exported to {dest}", 5000)
 
     # ------------------------------------------------------------------
     # Selection helpers
