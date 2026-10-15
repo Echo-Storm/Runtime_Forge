@@ -27,9 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
-import requests
-
-from core import checks, path_backup
+from core import checks, http_cache, path_backup
 from core.downloader import Trust, download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
@@ -788,7 +786,7 @@ def _net_resolve_latest(nd: _NetDef) -> Optional[LatestInfo]:
     log = get_logger()
     version = _NET_FALLBACK_VERSIONS[nd.ver]
     try:
-        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
+        resp = http_cache.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         for channel in resp.json().get("releases-index", []):
             if channel.get("channel-version") == nd.ver:
@@ -834,7 +832,7 @@ def _net_sdk_resolve_latest(sd: _NetSdkDef) -> LatestInfo:
     log = get_logger()
     version = _NET_SDK_FALLBACK_VERSIONS[sd.ver]
     try:
-        resp = requests.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
+        resp = http_cache.get(_NET_RELEASES_INDEX_URL, headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         for channel in resp.json().get("releases-index", []):
             if channel.get("channel-version") == sd.ver:
@@ -958,7 +956,7 @@ _VULKAN_FALLBACK_VERSION = "1.4.328.1"
 def _vulkan_resolve_latest() -> Optional[LatestInfo]:
     log = get_logger()
     try:
-        resp = requests.get("https://vulkan.lunarg.com/sdk/latest/windows.json", headers={"User-Agent": "Runtime-Forge"}, timeout=15)
+        resp = http_cache.get("https://vulkan.lunarg.com/sdk/latest/windows.json", headers={"User-Agent": "Runtime-Forge"}, timeout=15)
         resp.raise_for_status()
         version = resp.json()["windows"]
     except Exception as e:
@@ -1256,7 +1254,7 @@ _VSCODE_FALLBACK_URL = "https://aka.ms/win32-x64-user-stable"
 def _vscode_resolve_latest() -> LatestInfo:
     log = get_logger()
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             "https://update.code.visualstudio.com/api/update/win32-x64-user/stable/latest",
             headers={"User-Agent": "Runtime-Forge"}, timeout=15,
         )
@@ -1353,7 +1351,7 @@ def _llvm_resolve_latest() -> LatestInfo:
     # prefix parameter to a function 6+ other components already rely on.
     log = get_logger()
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             "https://api.github.com/repos/llvm/llvm-project/releases/latest",
             headers=github_headers(), timeout=15,
         )
@@ -1574,7 +1572,7 @@ def _jq_resolve_latest() -> LatestInfo:
     # not the "v1.8.2" convention (same situation as LLVM, different prefix).
     log = get_logger()
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             "https://api.github.com/repos/jqlang/jq/releases/latest",
             headers=github_headers(), timeout=15,
         )

@@ -21,7 +21,7 @@ from enum import Enum, auto
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from core import checks, path_backup
+from core import checks, http_cache, path_backup
 from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
 from core.paths import get_app_dir, get_data_dir
@@ -39,19 +39,21 @@ class ScanWorker(QThread):
         self.components = components
 
     def run(self):
-        # is_installed() checks are fast local ops (registry/file, or a
-        # short-timeout subprocess call) — kept sequential, in submission
-        # order, so results without a version concept show up immediately
-        # with no thread-pool overhead for a part that's already fast.
-        # resolve_latest() is the actual bottleneck: independent read-only
-        # HTTP calls to GitHub/Adoptium/nodejs.org with no shared resource
-        # between them to contend over — unlike installers (which share
-        # Windows Installer's single global lock), there's no correctness
-        # risk to running these concurrently, only a speed win.
+        # Each component is one independent task: its presence check (a
+        # registry/file read, or a short subprocess for tools that must be
+        # run to report a version - pwsh, git, node, cmake) and, for
+        # versioned ones, its latest-version lookup (a read-only HTTP GET,
+        # shared across components via core.http_cache). Nothing here
+        # mutates state or contends for a lock the way installers do
+        # (Windows Installer's single global mutex), so they all run
+        # concurrently. Results are emitted as each finishes; components with
+        # no version concept surface immediately.
         log = get_logger()
-        states: dict[str, InstalledState] = {}
-        versioned_components = []
-        for component in self.components:
+        # A Rescan should see the machine and the network as they are now.
+        checks.invalidate_registry_cache()
+        http_cache.clear()
+
+        def scan(component):
             try:
                 state = component.is_installed()
             except Exception as e:
@@ -62,26 +64,20 @@ class ScanWorker(QThread):
                 # the two apart.
                 log.status(f"WARNING: {component.name} presence check raised an exception ({e})")
                 state = InstalledState(installed=False)
-            states[component.key] = state
-            if component.resolve_latest is None:
-                self.component_scanned.emit(component.key, state, None)
-            else:
-                versioned_components.append(component)
-
-        if versioned_components:
-            def resolve(component):
+            latest = None
+            if component.resolve_latest is not None:
                 try:
-                    return component.key, component.resolve_latest()
+                    latest = component.resolve_latest()
                 except Exception as e:
                     log.status(f"WARNING: {component.name} latest-version check raised an exception ({e})")
-                    return component.key, None
+            return component.key, state, latest
 
-            worker_count = min(MAX_SCAN_WORKERS, len(versioned_components))
-            with ThreadPoolExecutor(max_workers=worker_count) as pool:
-                futures = [pool.submit(resolve, c) for c in versioned_components]
-                for future in as_completed(futures):
-                    key, latest = future.result()
-                    self.component_scanned.emit(key, states[key], latest)
+        worker_count = max(1, min(MAX_SCAN_WORKERS, len(self.components)))
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            futures = [pool.submit(scan, c) for c in self.components]
+            for future in as_completed(futures):
+                key, state, latest = future.result()
+                self.component_scanned.emit(key, state, latest)
 
         self.finished_scan.emit()
 
@@ -160,6 +156,7 @@ class InstallWorker(QThread):
 
             self.component_started.emit(component.key)
 
+            checks.invalidate_registry_cache()
             try:
                 state = component.is_installed()
             except Exception as e:
@@ -223,6 +220,7 @@ class InstallWorker(QThread):
                 self.component_finished.emit(component.key, ResultStatus.INSTALLED, "")
                 continue
 
+            checks.invalidate_registry_cache()
             try:
                 verified = component.is_installed().installed
             except Exception:
@@ -293,6 +291,7 @@ class UninstallWorker(QThread):
                 log.fail(f"{self.component.name} uninstall threw an exception: {e}")
                 ok = False
 
+            checks.invalidate_registry_cache()
             self.finished_uninstall.emit(self.component.key, ok)
         finally:
             log.remove_listener(listener)

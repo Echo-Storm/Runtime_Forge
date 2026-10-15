@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import winreg
 from ctypes import wintypes
 from pathlib import Path
@@ -182,6 +183,90 @@ _UNINSTALL_ROOTS = [
 ]
 
 
+class UninstallCommand:
+    def __init__(self, display_name: str, quiet_command: Optional[str], raw_command: Optional[str]):
+        self.display_name = display_name
+        self.quiet_command = quiet_command
+        self.raw_command = raw_command
+
+
+# A scan asks ~20 questions of the Uninstall and Installer\\Dependencies
+# keys (one per VC++ redist, per uninstall action, ...). Each used to walk the
+# whole registry subtree; now the subtree is read once into a snapshot that
+# every lookup shares, until invalidate_registry_cache() (called at the start
+# of each scan and after anything installs or uninstalls).
+_snapshot_lock = threading.Lock()
+_uninstall_snapshot: Optional[List[dict]] = None
+_dependencies_snapshot: Optional[List[dict]] = None
+
+
+def invalidate_registry_cache() -> None:
+    global _uninstall_snapshot, _dependencies_snapshot
+    with _snapshot_lock:
+        _uninstall_snapshot = None
+        _dependencies_snapshot = None
+
+
+def _read_values(entry, names: tuple) -> dict:
+    out = {}
+    for name in names:
+        try:
+            out[name], _ = winreg.QueryValueEx(entry, name)
+        except OSError:
+            out[name] = None
+    return out
+
+
+def _read_subkeys(root_key, subkey_path: str, value_names: tuple) -> List[dict]:
+    """Every immediate child of HKLM\\<subkey_path> that has a DisplayName,
+    with the requested values (missing ones are None). Registry order kept."""
+    rows: List[dict] = []
+    try:
+        with winreg.OpenKey(root_key, subkey_path) as parent:
+            i = 0
+            while True:
+                try:
+                    child_name = winreg.EnumKey(parent, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(parent, child_name) as entry:
+                        values = _read_values(entry, value_names)
+                except OSError:
+                    continue
+                if values.get("DisplayName"):
+                    rows.append(values)
+    except OSError:
+        pass
+    return rows
+
+
+def _uninstall_entries() -> List[dict]:
+    global _uninstall_snapshot
+    with _snapshot_lock:
+        if _uninstall_snapshot is None:
+            rows: List[dict] = []
+            for root in _UNINSTALL_ROOTS:
+                rows += _read_subkeys(
+                    winreg.HKEY_LOCAL_MACHINE, root,
+                    ("DisplayName", "DisplayVersion", "QuietUninstallString", "UninstallString"),
+                )
+            _uninstall_snapshot = rows
+        return _uninstall_snapshot
+
+
+def _dependency_entries() -> List[dict]:
+    global _dependencies_snapshot
+    with _snapshot_lock:
+        if _dependencies_snapshot is None:
+            _dependencies_snapshot = _read_subkeys(
+                winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\Installer\Dependencies",
+                ("DisplayName", "Version"),
+            )
+        return _dependencies_snapshot
+
+
 def find_uninstall_entry_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:
     """Scans the classic Programs-and-Features Uninstall keys (both the
     native and WOW6432Node views) for a DisplayName matching `pattern`,
@@ -192,37 +277,10 @@ def find_uninstall_entry_by_display_name(pattern: "re.Pattern[str]") -> Optional
     they only ever show up here, in the same place Programs and Features
     itself reads from, not under Installer\\Dependencies.
     """
-    for root in _UNINSTALL_ROOTS:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as uninstall_key:
-                i = 0
-                while True:
-                    try:
-                        subkey_name = winreg.EnumKey(uninstall_key, i)
-                    except OSError:
-                        break
-                    i += 1
-                    try:
-                        with winreg.OpenKey(uninstall_key, subkey_name) as entry:
-                            display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
-                            if pattern.search(display_name):
-                                try:
-                                    version, _ = winreg.QueryValueEx(entry, "DisplayVersion")
-                                except OSError:
-                                    version = None
-                                return version or display_name
-                    except OSError:
-                        continue
-        except OSError:
-            continue
+    for row in _uninstall_entries():
+        if pattern.search(row["DisplayName"]):
+            return row["DisplayVersion"] or row["DisplayName"]
     return None
-
-
-class UninstallCommand:
-    def __init__(self, display_name: str, quiet_command: Optional[str], raw_command: Optional[str]):
-        self.display_name = display_name
-        self.quiet_command = quiet_command
-        self.raw_command = raw_command
 
 
 def find_uninstall_command_by_display_name(pattern: "re.Pattern[str]") -> Optional[UninstallCommand]:
@@ -234,36 +292,14 @@ def find_uninstall_command_by_display_name(pattern: "re.Pattern[str]") -> Option
     machine that several MSI packages register UninstallString with the
     literal text "/I{GUID}" — the install/repair verb, not "/X{GUID}" for
     remove — so it can't be executed as-is and trusted to actually
-    uninstall anything)."""
-    for root in _UNINSTALL_ROOTS:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as uninstall_key:
-                i = 0
-                while True:
-                    try:
-                        subkey_name = winreg.EnumKey(uninstall_key, i)
-                    except OSError:
-                        break
-                    i += 1
-                    try:
-                        with winreg.OpenKey(uninstall_key, subkey_name) as entry:
-                            display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
-                            if pattern.search(display_name):
-                                quiet_command = None
-                                raw_command = None
-                                try:
-                                    quiet_command, _ = winreg.QueryValueEx(entry, "QuietUninstallString")
-                                except OSError:
-                                    pass
-                                try:
-                                    raw_command, _ = winreg.QueryValueEx(entry, "UninstallString")
-                                except OSError:
-                                    pass
-                                return UninstallCommand(display_name, quiet_command, raw_command)
-                    except OSError:
-                        continue
-        except OSError:
-            continue
+    uninstall anything).
+
+    Always reads the registry fresh: an uninstall command must never come
+    from a stale snapshot."""
+    invalidate_registry_cache()
+    for row in _uninstall_entries():
+        if pattern.search(row["DisplayName"]):
+            return UninstallCommand(row["DisplayName"], row["QuietUninstallString"], row["UninstallString"])
     return None
 
 
@@ -299,28 +335,9 @@ def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]
     Features reads from. Falls back to this only when the classic key
     check comes up empty.
     """
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\Installer\Dependencies") as deps_key:
-            i = 0
-            while True:
-                try:
-                    subkey_name = winreg.EnumKey(deps_key, i)
-                except OSError:
-                    break
-                i += 1
-                try:
-                    with winreg.OpenKey(deps_key, subkey_name) as entry:
-                        display_name, _ = winreg.QueryValueEx(entry, "DisplayName")
-                        if pattern.search(display_name):
-                            try:
-                                version, _ = winreg.QueryValueEx(entry, "Version")
-                            except OSError:
-                                version = None
-                            return version or display_name
-                except OSError:
-                    continue
-    except OSError:
-        pass
+    for row in _dependency_entries():
+        if pattern.search(row["DisplayName"]):
+            return row["Version"] or row["DisplayName"]
     return None
 
 

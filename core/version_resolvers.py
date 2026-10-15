@@ -15,8 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-import requests
-
+from core import http_cache
 from core.logger import get_logger
 
 REQUEST_TIMEOUT = 15
@@ -87,7 +86,7 @@ def get_latest_github_asset(
 ) -> LatestInfo:
     log = get_logger()
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             f"https://api.github.com/repos/{repo}/releases/latest",
             headers=github_headers(), timeout=REQUEST_TIMEOUT,
         )
@@ -112,7 +111,7 @@ def get_latest_github_asset(
 def get_latest_node_lts(fallback_version: str, fallback_url: str) -> LatestInfo:
     log = get_logger()
     try:
-        resp = requests.get("https://nodejs.org/dist/index.json", headers=_HEADERS, timeout=REQUEST_TIMEOUT)
+        resp = http_cache.get("https://nodejs.org/dist/index.json", headers=_HEADERS, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         for row in resp.json():
             if row.get("lts"):
@@ -152,7 +151,7 @@ def get_latest_temurin(feature_version: int, fallback_version: str) -> LatestInf
     log = get_logger()
     pattern = re.compile(rf"^OpenJDK{feature_version}U-jdk_x64_windows_hotspot_.*\.msi$")
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             f"https://api.github.com/repos/adoptium/temurin{feature_version}-binaries/releases/latest",
             headers=github_headers(), timeout=REQUEST_TIMEOUT,
         )
@@ -181,7 +180,7 @@ def get_latest_adoptium(feature_version: int, fallback_version: str) -> LatestIn
     filename = f"temurin-jdk-{feature_version}.msi"
     version = fallback_version
     try:
-        resp = requests.get(
+        resp = http_cache.get(
             f"https://api.adoptium.net/v3/assets/latest/{feature_version}/hotspot"
             "?image_type=jdk&os=windows&architecture=x64",
             headers=_HEADERS, timeout=REQUEST_TIMEOUT,
