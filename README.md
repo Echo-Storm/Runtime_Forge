@@ -25,7 +25,13 @@ Author: XechostormX
 
 Screenshot
 ----------
-<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a searchable component tree with status, installed and latest versions, a filter bar, a log and PATH-backup pane, and a one-click Install button"></p>
+<table>
+<tr>
+<td><img src="assets/screenshot.png" alt="Runtime Forge, dark theme: the component tree with status, installed and latest versions, filter chips, a Details pane for the selected component and a one-click Install button"></td>
+<td><img src="assets/screenshot-light.png" alt="Runtime Forge, light theme"></td>
+</tr>
+<tr><td align="center">Dark</td><td align="center">Light (or follow Windows)</td></tr>
+</table>
 
 What it does
 ------------
@@ -163,6 +169,9 @@ task, no auto-start entry, and no tray icon/background service.
 
 Dev tools
 ---------
+Picking this up again? Start with [HANDOFF.md](HANDOFF.md) — current state, the release
+recipe, what's untested and what's next.
+
 Everything lives in `tools/`; run any of them with
 `venv\Scripts\python.exe tools\<name>.py`.
 
@@ -170,7 +179,7 @@ Everything lives in `tools/`; run any of them with
 |---|---|
 | `run_tests.py [filter...] [-v]` | Runs every `tests/test_*.py` in its own process (offscreen Qt, throw-away data dir) and prints one PASS/FAIL line each. |
 | `verify_downloads.py [--only k,k] [--skip k,k]` | Downloads every component through the real hash/signature checks without installing anything. Run it after touching a URL, hash or publisher. ~1.5 GB for everything. |
-| `screenshot.py [out.png] [--width N --height N] [--no-banner]` | Renders the real window after a real scan to a PNG (how `assets/screenshot.png` is made). |
+| `screenshot.py out.png [--theme dark\|light] [--expand "A,B"] [--select KEY] [--no-banner] [--width N --height N]` | Renders the real window after a real scan to a PNG (how the README screenshots are made); settings go to a throw-away folder. |
 | `inspect_dll_version.py <path> [field ...]` | Prints a DLL/EXE's PE VERSIONINFO fields — what caught the OpenAL false-positive (an NVIDIA-bundled `OpenAL32.dll` passing a filename-only check). Reach for it when two binaries share a filename but not an identity. |
 | `gen_icon.py`, `gen_banner.py`, `gen_check.py` | Regenerate `assets/icon.*`, `assets/banner.png`, and the tick / dash / chevron images the stylesheet uses. Need Pillow (`requirements-dev.txt`). |
 

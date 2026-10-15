@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 - **Windows Terminal is now installable** (it wasn't offered before, though the
   bundled terminal profile depends on it). The profile refuses to apply when
   Terminal isn't there instead of creating an orphan settings folder.
