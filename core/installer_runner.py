@@ -11,9 +11,21 @@ from pathlib import Path
 from typing import List
 
 from core.logger import get_logger
+from core.downloader import reverify
 from core.signature import check_signature
 
 SUCCESS_CODES = {0, 3010, 1641, 1638}
+
+
+def _precheck(path: Path, name: str) -> bool:
+    """Files that came through core.downloader are re-verified (hash +
+    signer) at the moment of execution; anything else gets the old
+    warn-only signature check."""
+    verified = reverify(path, name)
+    if verified is None:
+        check_signature(str(path), name)
+        return True
+    return verified
 
 
 def run_exe(path: Path, args: List[str], name: str, dry_run: bool = False) -> bool:
@@ -25,7 +37,8 @@ def run_exe(path: Path, args: List[str], name: str, dry_run: bool = False) -> bo
         log.fail(f"Missing: {path}")
         return False
 
-    check_signature(str(path), name)
+    if not _precheck(path, name):
+        return False
     log.status(f"Running: {name}")
     try:
         result = subprocess.run(
@@ -49,7 +62,8 @@ def run_msi(path: Path, args: List[str], name: str, dry_run: bool = False) -> bo
         log.fail(f"Missing: {path}")
         return False
 
-    check_signature(str(path), name)
+    if not _precheck(path, name):
+        return False
     log.status(f"Running MSI: {name}")
     try:
         result = subprocess.run(

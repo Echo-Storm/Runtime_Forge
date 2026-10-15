@@ -30,18 +30,23 @@ from typing import Callable, List, Optional
 import requests
 
 from core import checks, path_backup
-from core.downloader import download
+from core.downloader import Trust, download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
 from core.paths import get_bundle_dir
-from core.signature import check_signature
-from core.version_resolvers import LatestInfo, get_latest_adoptium, get_latest_github_asset, get_latest_node_lts
+from core.signature import check_signature, verify_signature
+from core.version_resolvers import LatestInfo, asset_sha256, github_headers, get_latest_github_asset, get_latest_temurin, get_latest_node_lts
 
 PROGRAM_FILES = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
 SYSTEM_ROOT = Path(os.environ.get("SystemRoot", r"C:\Windows"))
 LOCAL_APPDATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
 
 ProgressCB = Optional[Callable[[str, float], None]]
+
+# Who must have signed each vendor's installer (checked via WinVerifyTrust
+# against the real signer names, probed from the actual installers).
+MICROSOFT = ("Microsoft Corporation",)
+_TRUST_MS = Trust(publishers=MICROSOFT)
 
 
 @dataclass
@@ -252,7 +257,8 @@ def ensure_seven_zip(ctx: InstallContext) -> Optional[Path]:
         log.dry("Would download & extract 7-Zip portable (7za.exe) for DirectX extraction")
         return exe
 
-    zip_path = download("https://www.7-zip.org/a/7za920.zip", ctx.temp_dir, "7za_bootstrap.zip", "7-Zip portable", ctx.dry_run)
+    zip_path = download("https://www.7-zip.org/a/7za920.zip", ctx.temp_dir, "7za_bootstrap.zip", "7-Zip portable", ctx.dry_run,
+                    trust=Trust(sha256="2a3afe19c180f8373fa02ff00254d5394fec0349f5804e0ad2f6067854ff28ac"))
     if not zip_path:
         return None
     try:
@@ -318,7 +324,12 @@ def _winget_install(ctx: InstallContext) -> bool:
     # what actually got installed).
     log = get_logger()
     latest = _winget_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"winget {latest.version}", ctx.dry_run)
+    # The pinned fallback URL (aka.ms/getwinget) has no file extension to
+    # derive a filename from, and Add-AppxPackage needs a real package one.
+    filename = (latest.filename if latest.filename.lower().endswith((".msixbundle", ".msix", ".appxbundle"))
+                else "Microsoft.DesktopAppInstaller.msixbundle")
+    file = download(latest.url, ctx.temp_dir, filename, f"winget {latest.version}", ctx.dry_run,
+                    trust=Trust(publishers=MICROSOFT, sha256=latest.sha256))
     if not file:
         return False
     if ctx.dry_run:
@@ -426,7 +437,7 @@ def _directx_install(ctx: InstallContext) -> bool:
     log = get_logger()
     dx = download(
         "https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe",
-        ctx.temp_dir, "directx_Jun2010_redist.exe", "DirectX June 2010", ctx.dry_run, ctx.progress_cb,
+        ctx.temp_dir, "directx_Jun2010_redist.exe", "DirectX June 2010", ctx.dry_run, ctx.progress_cb, trust=_TRUST_MS,
     )
     if not dx:
         return False
@@ -496,6 +507,7 @@ def _openal_dll_is_soft() -> Optional[str]:
 _OPENAL_SOFT_PATTERN = re.compile(r"^openal-soft-[\d.]+-bin\.zip$")
 _OPENAL_SOFT_FALLBACK_VERSION = "1.25.1"
 _OPENAL_SOFT_FALLBACK_URL = "https://openal-soft.org/openal-binaries/openal-soft-1.25.1-bin.zip"
+_OPENAL_SOFT_FALLBACK_SHA256 = "0915af01928b17e46f7c59ffc44a7413486bbef8424a3465109f489a80cb68a2"
 
 
 def _openal_resolve_latest() -> LatestInfo:
@@ -506,7 +518,8 @@ def _openal_resolve_latest() -> LatestInfo:
     # 1.25.2, one patch ahead of what was pinned here. Same GitHub-releases
     # pattern as git-for-windows/CMake/PowerShell — a real external source,
     # with a pinned fallback only for when the API is unreachable.
-    return get_latest_github_asset("kcat/openal-soft", _OPENAL_SOFT_PATTERN, _OPENAL_SOFT_FALLBACK_URL, _OPENAL_SOFT_FALLBACK_VERSION)
+    return get_latest_github_asset("kcat/openal-soft", _OPENAL_SOFT_PATTERN, _OPENAL_SOFT_FALLBACK_URL, _OPENAL_SOFT_FALLBACK_VERSION,
+                                    _OPENAL_SOFT_FALLBACK_SHA256)
 
 
 def _openal_is_installed() -> InstalledState:
@@ -518,7 +531,8 @@ def _openal_is_installed() -> InstalledState:
 
 def _openal_install_legacy_step(ctx: InstallContext) -> bool:
     log = get_logger()
-    zip_path = download("https://openal.org/downloads/oalinst.zip", ctx.temp_dir, "oalinst.zip", "OpenAL (Legacy compat)", ctx.dry_run)
+    zip_path = download("https://openal.org/downloads/oalinst.zip", ctx.temp_dir, "oalinst.zip", "OpenAL (Legacy compat)", ctx.dry_run,
+                       trust=Trust(sha256="d165bcb7628fd950d14847585468cc11943b2a1da92a59a839d397c68f9d4b06"))
     if not zip_path:
         return False
     if ctx.dry_run:
@@ -532,7 +546,7 @@ def _openal_install_legacy_step(ctx: InstallContext) -> bool:
         log.fail(f"Extraction failed: {e}")
         return False
     exe = extract_dir / "oalinst.exe"
-    if exe.is_file():
+    if exe.is_file() and verify_signature(str(exe), "oalinst.exe", ("Creative Labs",)):
         # Best-effort: on a genuinely bare machine (no pre-existing
         # OpenAL32.dll of any kind) this may do a real, fuller install.
         # Its own exit code isn't trusted as the final word, though — see
@@ -565,6 +579,7 @@ def _openal_install_soft_step(ctx: InstallContext) -> bool:
     zip_path = download(
         latest.url,
         ctx.temp_dir, latest.filename, f"OpenAL Soft {latest.version}", ctx.dry_run,
+        trust=Trust(sha256=latest.sha256),
     )
     if not zip_path:
         return False
@@ -678,7 +693,7 @@ def _vc_is_installed(vc: _VCDef) -> InstalledState:
 
 
 def _vc_install(vc: _VCDef, ctx: InstallContext) -> bool:
-    file = download(vc.url, ctx.temp_dir, f"vc_{vc.key}.exe", f"VC++ {vc.key}", ctx.dry_run, ctx.progress_cb)
+    file = download(vc.url, ctx.temp_dir, f"vc_{vc.key}.exe", f"VC++ {vc.key}", ctx.dry_run, ctx.progress_cb, trust=_TRUST_MS)
     if not file:
         return False
     return run_exe(file, vc.flags, f"VC++ {vc.key}", ctx.dry_run)
@@ -704,9 +719,12 @@ class _NetDef:
 _DOTNET_SHARED_ROOT = PROGRAM_FILES / "dotnet" / "shared"
 
 _NET_DEFS = [
+    # Offline installer; the old fwlink (2202440) now redirects to a marketing
+    # page instead of the installer.
     _NetDef(".NET Framework 4.8.1", "ndp481.exe", ["/q", "/norestart"], True,
             r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full",
-            "https://go.microsoft.com/fwlink/?linkid=2202440", min_release=528040),
+            "https://download.visualstudio.microsoft.com/download/pr/6f083c7e-bd40-44d4-9e3f-ffba71ec8b09/"
+            "3951fd5af6098f2c7e8ff5c331a0679c/ndp481-x86-x64-allos-enu.exe", min_release=528040),
     _NetDef(".NET 8 ASP.NET Core Runtime", "aspnetcore-8.exe", ["/quiet", "/norestart"], False,
             r"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.AspNetCore.App",
             "https://aka.ms/dotnet/8.0/aspnetcore-runtime-win-x64.exe", ver="8.0", shared_fx="Microsoft.AspNetCore.App"),
@@ -782,7 +800,7 @@ def _net_resolve_latest(nd: _NetDef) -> Optional[LatestInfo]:
 
 
 def _net_install(nd: _NetDef, ctx: InstallContext) -> bool:
-    file = download(nd.url, ctx.temp_dir, nd.file, nd.name, ctx.dry_run, ctx.progress_cb)
+    file = download(nd.url, ctx.temp_dir, nd.file, nd.name, ctx.dry_run, ctx.progress_cb, trust=_TRUST_MS)
     if not file:
         return False
     return run_exe(file, nd.flags, nd.name, ctx.dry_run)
@@ -864,7 +882,7 @@ def _net_sdk_uninstall(sd: _NetSdkDef, ctx: InstallContext) -> bool:
 
 def _net_sdk_install(sd: _NetSdkDef, ctx: InstallContext) -> bool:
     latest = _net_sdk_resolve_latest(sd)
-    file = download(latest.url, ctx.temp_dir, latest.filename, f".NET {sd.ver} SDK {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f".NET {sd.ver} SDK {latest.version}", ctx.dry_run, ctx.progress_cb, trust=_TRUST_MS)
     if not file:
         return False
     return run_exe(file, ["/quiet", "/norestart"], f".NET {sd.ver} SDK {latest.version}", ctx.dry_run)
@@ -905,7 +923,7 @@ def _jdk_path_entry(jd: _JdkDef) -> Optional[Path]:
 
 
 def _jdk_resolve_latest(jd: _JdkDef) -> Optional[LatestInfo]:
-    return get_latest_adoptium(jd.feature_version, jd.fallback_version)
+    return get_latest_temurin(jd.feature_version, jd.fallback_version)
 
 
 def _jdk_uninstall_pattern(jd: _JdkDef) -> "re.Pattern[str]":
@@ -922,7 +940,8 @@ def _jdk_uninstall_pattern(jd: _JdkDef) -> "re.Pattern[str]":
 
 def _jdk_install(jd: _JdkDef, ctx: InstallContext) -> bool:
     latest = _jdk_resolve_latest(jd)
-    file = download(latest.url, ctx.temp_dir, f"temurin-jdk-{jd.feature_version}.msi", jd.name, ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, jd.name, ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("Eclipse",), sha256=latest.sha256))
     if not file:
         return False
     return run_msi(file, ["/quiet", "/norestart", "INSTALLLEVEL=1"], jd.name, ctx.dry_run)
@@ -961,7 +980,8 @@ def _vulkan_is_installed() -> InstalledState:
 
 
 def _vulkan_install(ctx: InstallContext) -> bool:
-    file = download("https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe", ctx.temp_dir, "vulkan-runtime.exe", "Vulkan Runtime", ctx.dry_run, ctx.progress_cb)
+    file = download("https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe", ctx.temp_dir, "vulkan-runtime.exe", "Vulkan Runtime", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("LunarG",)))
     if not file:
         return False
     return run_exe(file, ["/S"], "Vulkan Runtime", ctx.dry_run)
@@ -997,7 +1017,8 @@ def _webview2_is_installed() -> InstalledState:
 
 
 def _webview2_install(ctx: InstallContext) -> bool:
-    file = download("https://go.microsoft.com/fwlink/p/?LinkId=2124703", ctx.temp_dir, "MicrosoftEdgeWebview2Setup.exe", "WebView2", ctx.dry_run, ctx.progress_cb)
+    file = download("https://go.microsoft.com/fwlink/p/?LinkId=2124703", ctx.temp_dir, "MicrosoftEdgeWebview2Setup.exe", "WebView2", ctx.dry_run, ctx.progress_cb,
+                    trust=_TRUST_MS)
     if not file:
         return False
     return run_exe(file, ["/silent", "/install"], "WebView2", ctx.dry_run)
@@ -1030,7 +1051,8 @@ def _pwsh_path_entry() -> Optional[Path]:
 
 def _pwsh_install(ctx: InstallContext) -> bool:
     latest = _pwsh_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"PowerShell {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"PowerShell {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=MICROSOFT, sha256=latest.sha256))
     if not file:
         return False
     return run_msi(
@@ -1053,10 +1075,15 @@ class _PyDef:
 
 
 _PY_DEFS = [
-    _PyDef("3.10", "3.10.20", "https://www.python.org/ftp/python/3.10.20/python-3.10.20-amd64.exe"),
-    _PyDef("3.11", "3.11.15", "https://www.python.org/ftp/python/3.11.15/python-3.11.15-amd64.exe"),
-    _PyDef("3.12", "3.12.13", "https://www.python.org/ftp/python/3.12.13/python-3.12.13-amd64.exe"),
+    # python.org stops publishing Windows binaries once a series moves to
+    # security-only (source-only) releases, so 3.10-3.12 are pinned to their
+    # LAST binary release - the newer patch numbers 404 for the installer.
+    # tools/verify_downloads.py catches this kind of drift.
+    _PyDef("3.10", "3.10.11", "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"),
+    _PyDef("3.11", "3.11.9", "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"),
+    _PyDef("3.12", "3.12.10", "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"),
     _PyDef("3.13", "3.13.14", "https://www.python.org/ftp/python/3.13.14/python-3.13.14-amd64.exe"),
+    _PyDef("3.14", "3.14.8", "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"),
 ]
 
 
@@ -1096,7 +1123,8 @@ def _py_resolve_latest(py: _PyDef) -> LatestInfo:
 
 
 def _py_install(py: _PyDef, ctx: InstallContext) -> bool:
-    file = download(py.url, ctx.temp_dir, f"python-{py.ver}-amd64.exe", f"Python {py.ver}", ctx.dry_run, ctx.progress_cb)
+    file = download(py.url, ctx.temp_dir, f"python-{py.ver}-amd64.exe", f"Python {py.ver}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("Python Software Foundation",)))
     if not file:
         return False
     return run_exe(file, ["/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_launcher=1"], f"Python {py.ver}", ctx.dry_run)
@@ -1135,7 +1163,8 @@ def _git_path_entry() -> Optional[Path]:
 
 def _git_install(ctx: InstallContext) -> bool:
     latest = _git_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"Git {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"Git {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("Johannes Schindelin", "Git for Windows"), sha256=latest.sha256))
     if not file:
         return False
     return run_exe(
@@ -1172,7 +1201,8 @@ def _node_path_entry() -> Optional[Path]:
 
 def _node_install(ctx: InstallContext) -> bool:
     latest = _node_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"Node.js {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"Node.js {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("OpenJS Foundation",)))
     if not file:
         return False
     return run_msi(file, ["/quiet", "/norestart", "ADDLOCAL=ALL"], f"Node.js {latest.version}", ctx.dry_run)
@@ -1207,7 +1237,8 @@ def _cmake_path_entry() -> Optional[Path]:
 
 def _cmake_install(ctx: InstallContext) -> bool:
     latest = _cmake_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"CMake {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"CMake {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("Kitware",), sha256=latest.sha256))
     if not file:
         return False
     return run_msi(file, ["/quiet", "/norestart", "ADD_CMAKE_TO_PATH=System"], f"CMake {latest.version}", ctx.dry_run)
@@ -1231,7 +1262,8 @@ def _vscode_resolve_latest() -> LatestInfo:
         )
         resp.raise_for_status()
         data = resp.json()
-        return LatestInfo(version=data["productVersion"], url=data["url"], filename=data["url"].rsplit("/", 1)[-1])
+        return LatestInfo(version=data["productVersion"], url=data["url"], filename=data["url"].rsplit("/", 1)[-1],
+                          sha256=data.get("sha256hash"))
     except Exception as e:
         log.status(f"Could not query VS Code update API ({e}); using pinned fallback")
         return LatestInfo(version=_VSCODE_FALLBACK_VERSION, url=_VSCODE_FALLBACK_URL, filename="VSCodeUserSetup-x64.exe")
@@ -1259,7 +1291,8 @@ def _vscode_path_entry() -> Optional[Path]:
 
 def _vscode_install(ctx: InstallContext) -> bool:
     latest = _vscode_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"VS Code {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"VS Code {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=MICROSOFT, sha256=latest.sha256))
     if not file:
         return False
     return run_exe(file, ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"], f"VS Code {latest.version}", ctx.dry_run)
@@ -1292,7 +1325,8 @@ def _gh_path_entry() -> Optional[Path]:
 
 def _gh_install(ctx: InstallContext) -> bool:
     latest = _gh_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"GitHub CLI {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"GitHub CLI {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("GitHub",), sha256=latest.sha256))
     if not file:
         return False
     return run_msi(file, ["/quiet", "/norestart"], f"GitHub CLI {latest.version}", ctx.dry_run)
@@ -1305,6 +1339,7 @@ def _gh_install(ctx: InstallContext) -> bool:
 _LLVM_PATTERN = re.compile(r"^LLVM-[\d.]+-win64\.exe$")
 _LLVM_FALLBACK_VERSION = "22.1.5"
 _LLVM_FALLBACK_URL = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.5/LLVM-22.1.5-win64.exe"
+_LLVM_FALLBACK_SHA256 = "faf0e0795ea91913d29856b3efcb178f2349e5137ae06eec4c96af8eda4565d8"
 _LLVM_EXE = PROGRAM_FILES / "LLVM" / "bin" / "clang.exe"
 
 
@@ -1320,7 +1355,7 @@ def _llvm_resolve_latest() -> LatestInfo:
     try:
         resp = requests.get(
             "https://api.github.com/repos/llvm/llvm-project/releases/latest",
-            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
+            headers=github_headers(), timeout=15,
         )
         resp.raise_for_status()
         rel = resp.json()
@@ -1330,11 +1365,13 @@ def _llvm_resolve_latest() -> LatestInfo:
                     version=rel["tag_name"].removeprefix("llvmorg-"),
                     url=asset["browser_download_url"],
                     filename=asset["name"],
+                    sha256=asset_sha256(asset),
                 )
         log.status("llvm/llvm-project latest release had no matching asset; using pinned fallback")
     except Exception as e:
         log.status(f"Could not query GitHub for llvm/llvm-project latest release ({e}); using pinned fallback")
-    return LatestInfo(version=_LLVM_FALLBACK_VERSION, url=_LLVM_FALLBACK_URL, filename=_LLVM_FALLBACK_URL.rsplit("/", 1)[-1])
+    return LatestInfo(version=_LLVM_FALLBACK_VERSION, url=_LLVM_FALLBACK_URL, filename=_LLVM_FALLBACK_URL.rsplit("/", 1)[-1],
+                      sha256=_LLVM_FALLBACK_SHA256)
 
 
 def _llvm_is_installed() -> InstalledState:
@@ -1350,7 +1387,8 @@ def _llvm_path_entry() -> Optional[Path]:
 
 def _llvm_install(ctx: InstallContext) -> bool:
     latest = _llvm_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"LLVM {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"LLVM {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(sha256=latest.sha256))
     if not file:
         return False
     # LLVM's installer is NSIS-based; /S is the standard NSIS silent flag.
@@ -1391,7 +1429,8 @@ def _sevenzip_app_path_entry() -> Optional[Path]:
 
 def _sevenzip_app_install(ctx: InstallContext) -> bool:
     latest = _sevenzip_app_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"7-Zip {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"7-Zip {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(sha256="6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"))
     if not file:
         return False
     # 7-Zip's installer is NSIS-based; /S is the standard NSIS silent flag.
@@ -1428,7 +1467,8 @@ def _winrar_path_entry() -> Optional[Path]:
 
 def _winrar_install(ctx: InstallContext) -> bool:
     latest = _winrar_resolve_latest()
-    file = download(latest.url, ctx.temp_dir, latest.filename, f"WinRAR {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, latest.filename, f"WinRAR {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(publishers=("win.rar",)))
     if not file:
         return False
     return run_exe(file, ["/S"], f"WinRAR {latest.version}", ctx.dry_run)
@@ -1442,13 +1482,15 @@ def _winrar_install(ctx: InstallContext) -> bool:
 _NINJA_PATTERN = re.compile(r"^ninja-win\.zip$")
 _NINJA_FALLBACK_VERSION = "1.13.2"
 _NINJA_FALLBACK_URL = "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip"
+_NINJA_FALLBACK_SHA256 = "07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65"
 _NINJA_INSTALL_DIR = PROGRAM_FILES / "ninja"
 _NINJA_EXE = _NINJA_INSTALL_DIR / "ninja.exe"
 _NINJA_VERSION_FILE = _NINJA_INSTALL_DIR / "VERSION.txt"
 
 
 def _ninja_resolve_latest() -> LatestInfo:
-    return get_latest_github_asset("ninja-build/ninja", _NINJA_PATTERN, _NINJA_FALLBACK_URL, _NINJA_FALLBACK_VERSION)
+    return get_latest_github_asset("ninja-build/ninja", _NINJA_PATTERN, _NINJA_FALLBACK_URL, _NINJA_FALLBACK_VERSION,
+                                    _NINJA_FALLBACK_SHA256)
 
 
 def _ninja_is_installed() -> InstalledState:
@@ -1480,7 +1522,8 @@ def _ninja_install(ctx: InstallContext) -> bool:
     # filename with the resolved version forces a cache miss on any real
     # version change.
     cache_filename = f"ninja-{latest.version}-win.zip"
-    zip_path = download(latest.url, ctx.temp_dir, cache_filename, f"ninja {latest.version}", ctx.dry_run, ctx.progress_cb)
+    zip_path = download(latest.url, ctx.temp_dir, cache_filename, f"ninja {latest.version}", ctx.dry_run, ctx.progress_cb,
+                       trust=Trust(sha256=latest.sha256))
     if not zip_path:
         return False
     if ctx.dry_run:
@@ -1520,6 +1563,7 @@ def _ninja_install(ctx: InstallContext) -> bool:
 _JQ_PATTERN = re.compile(r"^jq-windows-amd64\.exe$")
 _JQ_FALLBACK_VERSION = "1.8.2"
 _JQ_FALLBACK_URL = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"
+_JQ_FALLBACK_SHA256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
 _JQ_INSTALL_DIR = PROGRAM_FILES / "jq"
 _JQ_EXE = _JQ_INSTALL_DIR / "jq.exe"
 _JQ_VERSION_FILE = _JQ_INSTALL_DIR / "VERSION.txt"
@@ -1532,7 +1576,7 @@ def _jq_resolve_latest() -> LatestInfo:
     try:
         resp = requests.get(
             "https://api.github.com/repos/jqlang/jq/releases/latest",
-            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
+            headers=github_headers(), timeout=15,
         )
         resp.raise_for_status()
         rel = resp.json()
@@ -1542,11 +1586,12 @@ def _jq_resolve_latest() -> LatestInfo:
                     version=rel["tag_name"].removeprefix("jq-"),
                     url=asset["browser_download_url"],
                     filename="jq.exe",
+                    sha256=asset_sha256(asset),
                 )
         log.status("jqlang/jq latest release had no matching asset; using pinned fallback")
     except Exception as e:
         log.status(f"Could not query GitHub for jqlang/jq latest release ({e}); using pinned fallback")
-    return LatestInfo(version=_JQ_FALLBACK_VERSION, url=_JQ_FALLBACK_URL, filename="jq.exe")
+    return LatestInfo(version=_JQ_FALLBACK_VERSION, url=_JQ_FALLBACK_URL, filename="jq.exe", sha256=_JQ_FALLBACK_SHA256)
 
 
 def _jq_is_installed() -> InstalledState:
@@ -1570,7 +1615,8 @@ def _jq_install(ctx: InstallContext) -> bool:
     # behind by a crashed/killed prior run would be silently trusted as the
     # newly-resolved version. Tagging it with the resolved version forces a
     # cache miss on any real version change.
-    file = download(latest.url, ctx.temp_dir, f"jq-{latest.version}-download.exe", f"jq {latest.version}", ctx.dry_run, ctx.progress_cb)
+    file = download(latest.url, ctx.temp_dir, f"jq-{latest.version}-download.exe", f"jq {latest.version}", ctx.dry_run, ctx.progress_cb,
+                    trust=Trust(sha256=latest.sha256))
     if not file:
         return False
     if ctx.dry_run:

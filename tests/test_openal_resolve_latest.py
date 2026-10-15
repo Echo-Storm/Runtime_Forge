@@ -29,6 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import requests
+from core.version_resolvers import github_headers
 
 from core.definitions import build_components
 from core.logger import setup_logging
@@ -47,7 +48,7 @@ try:
     try:
         probe = requests.get(
             "https://api.github.com/repos/kcat/openal-soft/releases/latest",
-            headers={"User-Agent": "Runtime-Forge"}, timeout=15,
+            headers=github_headers(), timeout=15,
         )
         github_api_available = probe.status_code == 200
     except Exception:

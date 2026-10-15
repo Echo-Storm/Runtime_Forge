@@ -17,8 +17,9 @@
 ; that makes Windows elevate it on every launch regardless of install
 ; location, so a standard Program Files install (normally read-only to
 ; non-elevated processes) is consistent with how the app already runs -
-; it always has the access it needs to write its portable .ini/logs next
-; to the exe.
+; it always has the access it needs to stage installers next to the exe.
+; (Logs, settings, profiles and PATH backups are NOT written here - they go
+; to %LOCALAPPDATA%\RuntimeForge so they survive upgrades and uninstalls.)
 ;
 ; AppId is a fresh GUID, not carried over from the old "AIO Runtime
 ; Installer" identity - this is a rename/rebrand, not a version bump of
@@ -72,8 +73,12 @@ Name: "{group}\Uninstall Runtime Forge"; Filename: "{uninstallexe}"
 ; itself succeeded, only this post-install launch step failed.
 Filename: "{app}\RuntimeForge.exe"; Description: "Launch Runtime Forge now"; Flags: nowait postinstall skipifsilent runascurrentuser
 
+[UninstallDelete]
+; Installer staging is disposable (the app normally removes it itself).
+Type: filesandordirs; Name: "{app}\temp_installers"
+
 ; Deliberately no [UninstallDelete] entries for path_backups\, profiles\,
-; or the .ini/log files the app generates next to itself at runtime -
+; or the .ini/log files, which now live in %LOCALAPPDATA%\RuntimeForge -
 ; path_backups\ in particular is this app's own safety net for undoing a
 ; bad PATH change, so silently deleting it on uninstall would be actively
 ; harmful, not just unhelpful. Uninstalling only removes what this

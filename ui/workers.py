@@ -24,7 +24,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core import checks, path_backup
 from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
-from core.paths import get_app_dir
+from core.paths import get_app_dir, get_data_dir
 from core.version_resolvers import version_is_newer
 
 MAX_SCAN_WORKERS = 8
@@ -141,7 +141,7 @@ class InstallWorker(QThread):
             # This is a safety net for PATH itself getting mangled, separate
             # from each component's own "set PATH correctly" install flags.
             backup_path = path_backup.create_backup(
-                app_dir, f"before installing {len(self.components)} component(s)"
+                get_data_dir(), f"before installing {len(self.components)} component(s)"
             )
             if backup_path:
                 log.status(f"PATH backed up to {backup_path.name}")

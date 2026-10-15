@@ -108,9 +108,11 @@ venv\Scripts\pip install pyinstaller
 venv\Scripts\pyinstaller.exe RuntimeForge.spec --clean
 ```
 Output lands in `dist\RuntimeForge\` — copy the whole folder to
-distribute. It's portable: settings (`RuntimeForge.ini`) and log
-files are written next to the exe, nothing touches the registry except the
-components you choose to install.
+distribute. Running that folder directly is portable: settings
+(`RuntimeForge.ini`), logs, profiles and PATH backups are written next to the
+exe, and nothing touches the registry except the components you choose to
+install. (The installed copy stores those in `%LOCALAPPDATA%\RuntimeForge`
+instead, unless a file named `portable.txt` sits next to the exe.)
 
 Building the Windows installer
 -------------------------------
@@ -165,11 +167,14 @@ Runtimes (6 and 7 are intentionally omitted — both are past end-of-support).
 just running them. Same Microsoft releases-metadata API as the runtimes
 above (it has a `latest-sdk` field per channel alongside `latest-runtime`).
 
-**Java (Temurin JDK)** — 21, 17, and 8, resolved against Adoptium's latest
-API per major version.
+**Java (Temurin JDK)** — 21, 17, and 8, resolved to the latest release from
+Adoptium's `temurin<N>-binaries` GitHub releases (falling back to the
+Adoptium API), with the release's SHA-256 verified before running it.
 
-**Python** — 3.10, 3.11, 3.12, 3.13 (pinned patch versions, all-users
-install with PATH and the launcher).
+**Python** — 3.10, 3.11, 3.12, 3.13, 3.14 (pinned patch versions, all-users
+install with PATH and the launcher). python.org only publishes Windows
+installers for a series until it goes security-only, so 3.10–3.12 are pinned
+to their last installer release.
 
 **Dev Tools** — PowerShell 7, Git for Windows, Node.js (LTS), CMake, Visual
 Studio Code, GitHub CLI, LLVM/Clang, ninja, and jq — each resolved to its
@@ -215,10 +220,35 @@ Behavior Notes
   implausibly small files (usually an error page instead of the real
   installer).
 - `temp_installers\` is created next to the exe during a real install and
-  removed afterward; Dry Run touches nothing on disk or the network beyond
-  logging what it would have done.
-- Log files (`RuntimeForge_Log_*.txt`) are kept next to the exe,
-  newest 10 retained.
+  removed afterward (it stays beside the exe, not in your user profile,
+  because the files in it are run elevated and must not be writable by
+  unelevated processes); Dry Run touches nothing on disk or the network
+  beyond logging what it would have done.
+- Log files (`RuntimeForge_Log_*.txt`), `RuntimeForge.ini`, `profiles\` and
+  `path_backups\` live in `%LOCALAPPDATA%\RuntimeForge` for an installed
+  copy (next to the exe when run from source or with a `portable.txt`
+  beside it). Data from an earlier release that was written next to the exe
+  is moved there on first launch. Newest 10 logs retained.
+
+Installer integrity
+-------------------
+Every installer is checked before it runs, and again immediately before it
+is executed (so a file swapped on disk in between is caught):
+- **Authenticode** (via `WinVerifyTrust`): the signature must be valid *and*
+  the signer must be the expected publisher for that component (Microsoft,
+  Python Software Foundation, Eclipse, Kitware, GitHub, OpenJS, LunarG,
+  win.rar, ...). A valid signature from anyone else is refused.
+- **SHA-256**: GitHub release assets are checked against the digest GitHub
+  publishes, VS Code against its update API's hash, and the installers that
+  ship unsigned (7-Zip, LLVM, jq, ninja, OpenAL Soft) against hashes pinned in
+  source. A mismatch is never retried; the file is discarded.
+
+`tools\verify_downloads.py` downloads every component through this same
+path without installing anything and reports which ones verify - run it
+after touching a URL, hash, or publisher, or now and then to catch a vendor
+re-signing or republishing. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to lift
+GitHub's 60-requests-an-hour unauthenticated limit; the token is only ever
+sent to `api.github.com`.
 
 Support
 -------

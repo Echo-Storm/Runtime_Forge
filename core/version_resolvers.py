@@ -10,6 +10,7 @@ Every resolver returns a LatestInfo so the version shown in the GUI's
 user clicks Install — no separate/divergent version lookup.
 """
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -21,6 +22,17 @@ from core.logger import get_logger
 REQUEST_TIMEOUT = 15
 _HEADERS = {"User-Agent": "Runtime-Forge"}
 
+
+def github_headers() -> dict:
+    """Headers for api.github.com ONLY (never send the token to any other
+    host). Unauthenticated calls are limited to 60/hour, which a few scans
+    exhaust; set GITHUB_TOKEN (or GH_TOKEN) to lift that to 5000/hour."""
+    headers = dict(_HEADERS)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
 _VERSION_RUN = re.compile(r"\d+(?:[.+]\d+)*")
 
 
@@ -29,6 +41,13 @@ class LatestInfo:
     version: str
     url: str
     filename: str
+    sha256: Optional[str] = None    # from the release API's asset digest, when it offers one
+
+
+def asset_sha256(asset: dict) -> Optional[str]:
+    """GitHub exposes "digest": "sha256:<hex>" on release assets."""
+    digest = asset.get("digest") or ""
+    return digest.split(":", 1)[1] if digest.startswith("sha256:") else None
 
 
 def _numeric_tuple(version: str) -> tuple[int, ...]:
@@ -63,13 +82,14 @@ def version_is_newer(latest: str, installed: str) -> bool:
 
 
 def get_latest_github_asset(
-    repo: str, asset_pattern: str, fallback_url: str, fallback_version: str
+    repo: str, asset_pattern: str, fallback_url: str, fallback_version: str,
+    fallback_sha256: Optional[str] = None,
 ) -> LatestInfo:
     log = get_logger()
     try:
         resp = requests.get(
             f"https://api.github.com/repos/{repo}/releases/latest",
-            headers=_HEADERS, timeout=REQUEST_TIMEOUT,
+            headers=github_headers(), timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         rel = resp.json()
@@ -79,12 +99,14 @@ def get_latest_github_asset(
                     version=rel["tag_name"].lstrip("v"),
                     url=asset["browser_download_url"],
                     filename=asset["name"],
+                    sha256=asset_sha256(asset),
                 )
         log.status(f"{repo} latest release had no asset matching pattern; using pinned fallback")
     except Exception as e:
         log.status(f"Could not query GitHub for {repo} latest release ({e}); using pinned fallback")
 
-    return LatestInfo(version=fallback_version, url=fallback_url, filename=fallback_url.rsplit("/", 1)[-1])
+    return LatestInfo(version=fallback_version, url=fallback_url, filename=fallback_url.rsplit("/", 1)[-1],
+                      sha256=fallback_sha256)
 
 
 def get_latest_node_lts(fallback_version: str, fallback_url: str) -> LatestInfo:
@@ -105,6 +127,46 @@ def get_latest_node_lts(fallback_version: str, fallback_url: str) -> LatestInfo:
         log.status(f"Could not query Node.js dist index ({e}); using pinned fallback")
 
     return LatestInfo(version=fallback_version, url=fallback_url, filename=fallback_url.rsplit("/", 1)[-1])
+
+
+_TEMURIN_FILE = re.compile(r"_(\d+(?:\.\d+)*)_(\d+)\.msi$|_(8)u(\d+)b(\d+)\.msi$")
+
+
+def _temurin_version_from_filename(name: str) -> Optional[str]:
+    """OpenJDK21U-...hotspot_21.0.12.1_1.msi -> "21.0.12.1+1";
+    OpenJDK8U-...hotspot_8u504b01.msi -> "8.0.504+1"."""
+    m = _TEMURIN_FILE.search(name)
+    if not m:
+        return None
+    if m.group(1):
+        return f"{m.group(1)}+{m.group(2)}"
+    return f"{m.group(3)}.0.{m.group(4)}+{int(m.group(5))}"
+
+
+def get_latest_temurin(feature_version: int, fallback_version: str) -> LatestInfo:
+    """Temurin's MSI from the adoptium/temurin<N>-binaries GitHub release:
+    carries a SHA-256 digest, and avoids api.adoptium.net, which resets TLS
+    handshakes from Python's OpenSSL on some machines (curl/Schannel are
+    fine). Falls back to the Adoptium API if GitHub can't be reached (rate
+    limit, offline)."""
+    log = get_logger()
+    pattern = re.compile(rf"^OpenJDK{feature_version}U-jdk_x64_windows_hotspot_.*\.msi$")
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/adoptium/temurin{feature_version}-binaries/releases/latest",
+            headers=github_headers(), timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        for asset in resp.json().get("assets", []):
+            if pattern.search(asset["name"]):
+                version = _temurin_version_from_filename(asset["name"])
+                if version:
+                    return LatestInfo(version=version, url=asset["browser_download_url"],
+                                      filename=asset["name"], sha256=asset_sha256(asset))
+        log.status(f"temurin{feature_version}-binaries latest release had no matching MSI; trying the Adoptium API")
+    except Exception as e:
+        log.status(f"Could not query GitHub for Temurin {feature_version} ({e}); trying the Adoptium API")
+    return get_latest_adoptium(feature_version, fallback_version)
 
 
 def get_latest_adoptium(feature_version: int, fallback_version: str) -> LatestInfo:

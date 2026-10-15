@@ -23,7 +23,7 @@ from PyQt6.QtGui import QColor, QDesktopServices
 from core import path_backup, profiles
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from core.version_resolvers import LatestInfo, version_is_newer
 from ui.workers import InstallWorker, ResultStatus, ScanWorker, UninstallWorker
 
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.app_dir = get_app_dir()
+        self.app_dir = get_data_dir()  # user data (logs, settings, profiles, PATH backups)
         self.logger = setup_logging(self.app_dir)
         self.logger.status(f"{self.APP_NAME} v{self.APP_VERSION} starting")
 
