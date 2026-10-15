@@ -361,6 +361,41 @@ def appx_package_version(name: str, publisher_id: str) -> Optional[str]:
     return best
 
 
+_CBS_PACKAGES = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\Packages"
+_CBS_INSTALLED = 112  # 0x70: the package is installed (64 = staged but not installed)
+
+
+def cbs_package_state(name_pattern: str) -> Optional[bool]:
+    """Whether a Windows optional-feature package is installed, read from the
+    Component Based Servicing registry (no dism, no elevation needed).
+    True if any package whose name matches `name_pattern` is installed, False
+    if some match but none are installed, None if nothing matches at all (the
+    feature doesn't exist on this Windows build)."""
+    pattern = re.compile(name_pattern)
+    matched = False
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _CBS_PACKAGES) as packages:
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(packages, i)
+                except OSError:
+                    break
+                i += 1
+                if not pattern.search(name):
+                    continue
+                matched = True
+                try:
+                    with winreg.OpenKey(packages, name) as package:
+                        if winreg.QueryValueEx(package, "CurrentState")[0] == _CBS_INSTALLED:
+                            return True
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return False if matched else None
+
+
 def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:
     """Scans HKLM\\SOFTWARE\\Classes\\Installer\\Dependencies\\* for a
     DisplayName matching `pattern`, returning its Version or None.

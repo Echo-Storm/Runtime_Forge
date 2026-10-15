@@ -1,17 +1,18 @@
 # Runtime Forge — handoff notes
 
-For whoever (human or Claude) picks this up next. Written at v0.4.0.
+For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for v0.4.1 (unreleased).
 
 ## Where things stand
 
-- **App:** PyQt6 desktop GUI that scans, installs, updates and uninstalls 62 Windows
+- **App:** PyQt6 desktop GUI that scans, installs, updates and uninstalls 72 Windows
   runtimes / dev tools / apps. Dark + light theme (follows Windows). See `README.md`.
 - **Repo:** <https://github.com/Echo-Storm/Runtime_Forge>, branch `main`, public.
-- **Releases:** v0.2.0, v0.3.0, v0.4.0 (v0.1.0 was deleted — its installer had been
+- **Releases:** v0.2.0, v0.3.0, v0.4.0 (v0.4.1 is committed, not yet released; v0.1.0 was deleted — its installer had been
   built from a stale `dist/`). Latest is v0.4.0.
 - **Tests:** 22 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
-- **The one thing nobody has done yet:** run the *installed* app (elevated) and install the
-  v0.4.0 additions for real. Everything below "Untested" is that list.
+- **First real run (v0.4.0, elevated, on the author's machine — see the log summary below):**
+  13 installs succeeded, 3 were falsely reported failed (DirectPlay, VC++ 2015-2022 x86/x64 —
+  detection bugs, fixed in 0.4.1). The log lives in `%LOCALAPPDATA%\RuntimeForge\RuntimeForge_Log_*.txt`.
 
 ## Map of the code
 
@@ -20,14 +21,15 @@ runtime_forge.py        entry point
 core/
   definitions.py        the core registry: Component dataclass, build_components(), VC++/.NET/JDK/
                         Python/dev-tool installers, uninstall helpers, CATEGORY_ORDER
-  catalog.py            the v0.4.0 additions (Terminal, DirectPlay, XNA, PhysX, uv, Go, Rust, Ghidra,
-                        MSYS2, Inno Setup, Chrome, Discord, AnyDesk, Claude); winget-backed factory
+  catalog.py            the v0.4.0/0.4.1 additions (Terminal, DirectPlay, XNA, PhysX, uv, Go, Rust, Ghidra,
+                        MSYS2, Inno Setup, Chrome, and ~16 winget-backed apps); winget-backed factory
   downloader.py         download() + Trust(publishers, sha256); verify on fresh AND cached files;
                         reverify() right before execution
   signature.py          WinVerifyTrust via ctypes, signer CN/O extraction, publisher allowlist
   installer_runner.py   run_exe / run_msi (re-verify, exit-code handling, timeout)
   version_resolvers.py  GitHub / Adoptium / Node lookups, LatestInfo(version,url,filename,sha256)
-  http_cache.py         session cache for "latest version" GETs (single-flight, TTL)
+  http_cache.py         lookups cache: in-memory single-flight + on-disk ETag copies that survive
+                        GitHub's rate limit (`http_cache.json` in the data folder)
   checks.py             registry/PE/command probes; one-read registry snapshot; appx_package_version()
   path_backup.py / profiles.py / logger.py / paths.py
 ui/
@@ -94,29 +96,38 @@ assets/                 icon, banner, screenshots, tick/dash/chevron images, Win
 - Only the **packaged** app checks for newer releases; a source checkout doesn't
   (`RF_FORCE_UPDATE_CHECK=1` forces it).
 
-## Untested — check these first when you run v0.4.0
+## What the first real run showed (v0.4.0 log)
 
-Everything below was verified *offline* (detection against this machine, command construction,
-download hash/signature) but never actually executed as an install:
+Verified working end to end, elevated: **Vulkan, XNA 4.0, .NET 10 ASP.NET + Desktop runtimes,
+.NET 8 SDK (fresh) + .NET 10 SDK (update), Python 3.13 update, uv, Node.js, VS Code update,
+ninja, jq, Windows Terminal update** — signatures/hashes all passed, post-install verification
+passed. The signer for the .NET installers reads ".NET (Microsoft Corporation)", which the
+allowlist matches on the organization.
 
-- [ ] The **installer itself** and the elevated launch (UAC prompt, Start Menu shortcut, uninstall).
-- [ ] **DirectPlay** — "installed" means both `System32` and `SysWOW64` `dplayx.dll` exist (a
-      heuristic; `dism` needs admin to ask properly). Does enabling it flip the check?
-- [ ] **XNA 4.0** MSI silent install + its Programs-and-Features entry name.
-- [ ] **Windows Terminal** msixbundle `Add-AppxPackage` (dependencies VCLibs / UI.Xaml are
-      assumed present on Win11) and the profile component afterwards.
+Found and fixed in 0.4.1:
+- DirectPlay: dism succeeded but detection looked for a 64-bit `dplayx.dll` that doesn't exist.
+- VC++ 2015-2022: exit code 1638 ("a newer version is installed") is treated as success by
+  `run_exe`, but detection only knew the old "2015-2022" display name, not "v14".
+- GitHub's unauthenticated rate limit was hit within minutes (the app fell back to pinned versions
+  and, for Temurin, to an Adoptium API that fails TLS from Python) → disk ETag cache.
+
+## Still untested — check these when you run 0.4.1
+
+(Verified offline only: downloads, hashes, signatures, detection, command construction.)
+
+- [ ] The **installer itself** (UAC prompt, Start Menu shortcut, uninstall).
 - [ ] **Rust**: `rustup-init -y …` (needs the MSVC build tools to *link*); `rustup self uninstall`.
 - [ ] **Ghidra**: ~500 MB extraction into `Program Files\Ghidra`; needs JDK 21.
-- [ ] **Go** MSI (PATH, uninstall via the registry entry).
-- [ ] **uv** portable placement + PATH entry + uninstall.
-- [ ] **Chrome** enterprise MSI (silent, uninstall via `^Google Chrome$`).
-- [ ] The **winget-backed** six — Discord, AnyDesk, Claude, MSYS2, Inno Setup, PhysX: command is
+- [ ] **Go** MSI (PATH, uninstall via the registry entry), **Chrome** enterprise MSI.
+- [ ] The **winget-backed** set — Discord, AnyDesk, Claude, MSYS2, Inno Setup, PhysX, Firefox, Edge,
+      OneDrive, Windows App, Steam, Epic, K-Lite, IrfanView, Notepad++, Sublime. Command:
       `winget install --id … -e --silent --accept-package-agreements --accept-source-agreements
-      --disable-interactivity`; check exit codes, per-user installs under an elevated process,
-      and the detection patterns (`catalog.py`: `_discord_state`, `_anydesk_state`, …).
-- [ ] *Optional* behavior on a fresh machine: first scan pre-checks only the non-optional missing items.
-- [ ] A real **update** path for something with a newer release (the app's own: the status-bar
-      "v0.x available" button).
+      --disable-interactivity`. Watch exit codes, per-user installs under an elevated process, and
+      the detection patterns in `catalog.py`. **Windows App** detection asks `winget list` (it
+      leaves no registry entry we could verify) — check it flips to "Installed" after installing.
+- [ ] *Optional* behavior on a fresh machine: the first scan pre-checks only non-optional missing items.
+- [ ] The status-bar "v0.x available" button once a newer release than the running one exists.
+- [ ] Uninstall paths for the new components (none have been exercised).
 
 ## What's next (suggested order)
 

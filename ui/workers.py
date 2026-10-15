@@ -91,6 +91,7 @@ class ScanWorker(QThread):
                 key, state, latest = future.result()
                 self.component_scanned.emit(key, state, latest)
 
+        http_cache.flush()  # persist what this scan learned (survives a rate-limited rescan)
         self.finished_scan.emit()
 
 

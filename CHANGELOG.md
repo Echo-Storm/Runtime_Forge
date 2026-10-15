@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+Fixes from the first real elevated run of 0.4.0 (13 installs succeeded; 3 were
+falsely reported as failed), plus the rest of the everyday apps.
+- **DirectPlay** was enabled but reported as not installed: its 64-bit DLL doesn't
+  exist (the feature only provides a 32-bit one). Detection now reads the servicing
+  stack's own record.
+- **VC++ 2015-2022 (x86/x64)** showed as missing — and "failed" after a successful
+  install (exit 1638, a newer one was already present) — because current redistributables
+  call themselves "Visual C++ v14 Redistributable". Detection understands both names.
+- **GitHub rate limits** no longer degrade a scan: lookups are stored on disk with their
+  ETags (`http_cache.json`), revalidated with conditional requests (304s are free), and the
+  last good copy is used when GitHub rate-limits or is unreachable.
+- **More apps** (optional): Firefox, Microsoft Edge, OneDrive, Windows App, Steam, Epic Games
+  Launcher, K-Lite Codec Pack, IrfanView, plus Notepad++ and Sublime Text 4 under Dev Tools
+  — 72 components.
+
 ## 0.4.0
 - **Windows Terminal is now installable** (it wasn't offered before, though the
   bundled terminal profile depends on it). The profile refuses to apply when

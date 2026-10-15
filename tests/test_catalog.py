@@ -36,7 +36,9 @@ results = {}
 
 components = {c.key: c for c in build_components()}
 catalog_keys = ["terminal", "directplay", "xna40", "physx", "uv", "go", "rust", "ghidra",
-                "msys2", "innosetup", "chrome", "discord", "anydesk", "claude"]
+                "msys2", "innosetup", "chrome", "discord", "anydesk", "claude",
+                "firefox", "edge", "onedrive", "windowsapp", "steam", "epic", "klite", "irfanview",
+                "notepadpp", "sublime"]
 
 # ---- registry shape
 results["all_catalog_components_registered"] = all(k in components for k in catalog_keys)
@@ -47,6 +49,8 @@ results["categories_as_designed"] = cats == {
     "physx": "Legacy Game Support", "uv": "Python", "go": "Go & Rust", "rust": "Go & Rust",
     "ghidra": "Dev Tools", "msys2": "Dev Tools", "innosetup": "Dev Tools", "chrome": "Apps",
     "discord": "Apps", "anydesk": "Apps", "claude": "Apps",
+    "firefox": "Apps", "edge": "Apps", "onedrive": "Apps", "windowsapp": "Apps", "steam": "Apps",
+    "epic": "Apps", "klite": "Apps", "irfanview": "Apps", "notepadpp": "Dev Tools", "sublime": "Dev Tools",
 }
 order = [CATEGORY_ORDER.index(c.category) if c.category in CATEGORY_ORDER else 99 for c in build_components()]
 results["components_come_out_grouped_in_category_order"] = order == sorted(order)
@@ -55,7 +59,15 @@ results["optional_flags"] = (
     and not any(components[k].optional for k in ("terminal", "directplay", "xna40"))
 )
 results["every_catalog_component_has_a_note_or_is_plain"] = all(isinstance(components[k].note, str) for k in catalog_keys)
-results["winget_backed_components_say_so"] = all("winget" in components[k].note.lower() for k in ("discord", "anydesk", "claude", "msys2", "innosetup", "physx"))
+results["winget_backed_components_say_so"] = all(
+    "winget" in components[k].note.lower()
+    for k in ("discord", "anydesk", "claude", "msys2", "innosetup", "physx", "firefox", "edge", "onedrive",
+              "windowsapp", "steam", "epic", "klite", "irfanview", "notepadpp", "sublime")
+)
+results["edge_cannot_be_uninstalled_from_the_app"] = components["edge"].uninstall is None
+results["other_winget_apps_can_be_uninstalled"] = all(components[k].uninstall is not None for k in ("firefox", "steam", "notepadpp"))
+results["new_apps_are_optional"] = all(components[k].optional for k in (
+    "firefox", "edge", "onedrive", "windowsapp", "steam", "epic", "klite", "irfanview", "notepadpp", "sublime"))
 results["vscode_can_be_uninstalled_now"] = components["vscode"].uninstall is not None
 
 # ---- Appx package lookup (fake registry, no machine state)
@@ -110,6 +122,96 @@ try:
     results["entry_state_missing_is_not_installed"] = not catalog._entry_state("x").installed
 finally:
     checks.find_uninstall_entry_by_display_name = real_find
+
+# ---- DirectPlay: the servicing stack's record decides, not a DLL that lingers
+class _CbsKey:
+    def __init__(self, state):
+        self.state = state
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeCbsWinreg:
+    HKEY_LOCAL_MACHINE = object()
+
+    def __init__(self, packages):
+        self.packages = packages     # name -> CurrentState
+
+    def OpenKey(self, parent, name=None):
+        if isinstance(parent, _CbsKey) or name is not None and name in self.packages:
+            return _CbsKey(self.packages[name])
+        return _CbsKey(None)
+
+    def EnumKey(self, key, i):
+        names = list(self.packages)
+        if i >= len(names):
+            raise OSError
+        return names[i]
+
+    def QueryValueEx(self, key, value_name):
+        return (key.state, 4)
+
+
+real_winreg = checks.winreg
+try:
+    pkg = "Microsoft-Windows-DirectPlay-OC-Package~31bf3856ad364e35~amd64~~10.0.26100.4202"
+    other = "Microsoft-Windows-Something-Else~31bf3856ad364e35~amd64~~10.0.26100.1"
+    checks.winreg = _FakeCbsWinreg({pkg: 112, other: 112})
+    results["cbs_installed_package_reports_true"] = checks.cbs_package_state(catalog._DIRECTPLAY_PACKAGE) is True
+    checks.winreg = _FakeCbsWinreg({pkg: 64, other: 112})
+    results["cbs_staged_only_package_reports_false"] = checks.cbs_package_state(catalog._DIRECTPLAY_PACKAGE) is False
+    checks.winreg = _FakeCbsWinreg({other: 112})
+    results["cbs_no_matching_package_is_none"] = checks.cbs_package_state(catalog._DIRECTPLAY_PACKAGE) is None
+
+    real_state = checks.cbs_package_state
+    checks.cbs_package_state = lambda pattern: True
+    results["directplay_installed_when_feature_enabled"] = catalog._directplay_state().installed
+    checks.cbs_package_state = lambda pattern: False
+    results["directplay_not_installed_when_feature_off_even_if_dll_lingers"] = not catalog._directplay_state().installed
+    checks.cbs_package_state = real_state
+finally:
+    checks.winreg = real_winreg
+
+# ---- VC++ 2015-2022 detection understands the "v14" display names
+captured_patterns = []
+real_reg_value, real_find_dep = checks.reg_value, checks.find_dependency_by_display_name
+try:
+    checks.reg_value = lambda *a, **k: None
+    checks.find_dependency_by_display_name = lambda pattern: captured_patterns.append(pattern) or "14.50.35719.0"
+    state = definitions._vc_is_installed(next(v for v in definitions._VC_DEFS if v.key == "2015-2022_x64"))
+    pattern = captured_patterns[-1]
+    results["vc_2015_2022_found_via_dependencies"] = state == InstalledState(True, "14.50.35719.0")
+    results["vc_pattern_matches_new_v14_name"] = bool(pattern.search("Microsoft Visual C++ v14 Redistributable (x64) - 14.50.35719"))
+    results["vc_pattern_matches_classic_2015_2022_name"] = bool(pattern.search("Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33135"))
+    results["vc_pattern_ignores_additional_runtime_entries"] = not pattern.search("Microsoft Visual C++ 2022 X64 Additional Runtime - 14.50.35719")
+    results["vc_pattern_ignores_the_other_architecture"] = not pattern.search("Microsoft Visual C++ v14 Redistributable (x86) - 14.50.35719")
+    definitions._vc_is_installed(next(v for v in definitions._VC_DEFS if v.key == "2012_x86"))
+    old_pattern = captured_patterns[-1]
+    results["older_years_still_match_their_own_names"] = bool(old_pattern.search("Microsoft Visual C++ 2012 Redistributable (x86) - 11.0.61030")) and not old_pattern.search("Microsoft Visual C++ 2013 Redistributable (x86) - 12.0.40664")
+finally:
+    checks.reg_value, checks.find_dependency_by_display_name = real_reg_value, real_find_dep
+
+# ---- winget list parsing (Windows App has no registry trail we can read)
+class _ListResult:
+    def __init__(self, out):
+        self.stdout, self.returncode = out, 0
+
+
+real_run, real_on_path = subprocess.run, checks.command_on_path
+try:
+    checks.command_on_path = lambda name: r"C:\fake\winget.exe"
+    subprocess.run = lambda *a, **k: _ListResult("Name        Id                    Version\n----\nWindows App Microsoft.WindowsApp 2.0.1482.0\n")
+    results["winget_list_finds_installed_package_and_version"] = catalog._winget_list_state("Microsoft.WindowsApp") == InstalledState(True, "2.0.1482.0")
+    subprocess.run = lambda *a, **k: _ListResult("No installed package found matching input criteria.\n")
+    results["winget_list_missing_package_is_not_installed"] = not catalog._winget_list_state("Microsoft.WindowsApp").installed
+    checks.command_on_path = lambda name: None
+    results["winget_list_without_winget_is_not_installed"] = not catalog._winget_list_state("Microsoft.WindowsApp").installed
+finally:
+    subprocess.run, checks.command_on_path = real_run, real_on_path
 
 # ---- GitHub resolver: asset match, version from tag, fallback on failure
 import re

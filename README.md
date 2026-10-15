@@ -37,10 +37,10 @@ What it does
 ------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
-  release exists, what's available) instead of a plain yes/no. All 62
+  release exists, what's available) instead of a plain yes/no. All 72
   components report their real installed version, not just presence; 37 of
   them can also be checked for updates against a real source (a live API, or
-  this app's own pinned install target). The other 25 — DirectX, .NET
+  this app's own pinned install target). The other 35 — DirectX, .NET
   Framework 3.5, WebView2, DirectPlay, XNA, the VC++ redistributables, the
   self-updating apps and the Windows Terminal profile — have no meaningful
   "latest version" to compare against at all
@@ -78,6 +78,9 @@ What it does
   Deliberately not opinionated about the rest of dev tooling (Git/Node/
   CMake/VS Code/PowerShell). Only seeds if you have zero profiles at all —
   never overwrites or fights with anything you've built or renamed.
+- **Rate-limit proof lookups** — version lookups are cached on disk with their ETags: a
+  repeat request is conditional (GitHub doesn't count a 304), and if GitHub rate-limits
+  or is unreachable the last good answer is used instead of guessing from pinned versions.
 - **Fast scans** — every component's presence check and latest-version lookup
   runs concurrently (8 at a time); lookups share one in-process cache (the
   nine .NET components share a single request, and installing reuses what
@@ -201,7 +204,7 @@ runs them all.
 
 What It Installs / Enables
 -----------------------------------------------
-Everything the tree offers, by category (62 components in all):
+Everything the tree offers, by category (72 components in all):
 
 **Core Runtimes** — winget, .NET Framework 3.5, DirectX June 2010 (full
 legacy DirectX 9.0c via DXSETUP), OpenAL (plants the Legacy compatibility
@@ -265,9 +268,13 @@ against the SHA-256 the Rust project publishes, then `rustup` fetches the
 stable toolchain for the current user). Rust links with the Microsoft C++
 build tools, so Visual Studio Build Tools has to be there too.
 
-**Apps** — a small, entirely optional set: **Google Chrome** (the enterprise
-MSI, signature-checked), and **Discord**, **AnyDesk** and the **Claude**
-desktop app, installed through winget. Apps — and the other things marked
+**Apps** — an entirely optional set of everyday programs: **Google Chrome**
+(the enterprise MSI, signature-checked) and, installed through winget,
+**Firefox**, **Microsoft Edge** (repair/update only — it's part of Windows),
+**Discord**, **AnyDesk**, the **Claude** desktop app, **Microsoft OneDrive**,
+**Windows App** (Remote Desktop), **Steam**, **Epic Games Launcher**,
+**K-Lite Codec Pack** and **IrfanView**. **Notepad++** and **Sublime Text 4**
+sit under Dev Tools the same way. Apps — and the other things marked
 *optional* in the Details tab (Go, Rust, uv, Ghidra, MSYS2, Inno Setup,
 PhysX) — are never pre-checked by the first scan or by *Select needed*; you
 tick them deliberately. (An update to one that's already installed *is*
@@ -321,8 +328,8 @@ is executed (so a file swapped on disk in between is caught):
   ship unsigned (7-Zip, LLVM, jq, ninja, OpenAL Soft) against hashes pinned in
   source. A mismatch is never retried; the file is discarded.
 
-Components installed *through winget* (Discord, AnyDesk, Claude, MSYS2, Inno
-Setup, PhysX) are verified by winget itself against the SHA-256 in each
+Components installed *through winget* (Discord, AnyDesk, Claude, Firefox, Steam,
+Notepad++, MSYS2, Inno Setup, PhysX and the other apps) are verified by winget itself against the SHA-256 in each
 package's reviewed manifest; they need the winget component installed first,
 and the app says so plainly if it isn't.
 

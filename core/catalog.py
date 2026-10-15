@@ -163,7 +163,8 @@ def _winget_run(args: List[str], name: str, ctx: InstallContext, timeout: int = 
 
 def _winget_component(key: str, name: str, category: str, winget_id: str,
                       is_installed: Callable[[], InstalledState], note: str = "",
-                      optional: bool = True, location: Optional[Callable[[], Optional[Path]]] = None) -> Component:
+                      optional: bool = True, location: Optional[Callable[[], Optional[Path]]] = None,
+                      removable: bool = True) -> Component:
     def install(ctx: InstallContext) -> bool:
         return _winget_run(
             ["install", "--id", winget_id, "-e", "--silent", "--accept-package-agreements", *_WINGET_BASE],
@@ -174,7 +175,7 @@ def _winget_component(key: str, name: str, category: str, winget_id: str,
         return _winget_run(["uninstall", "--id", winget_id, "-e", "--silent", *_WINGET_BASE], name, ctx, timeout=900)
 
     return Component(
-        key, name, category, is_installed, install, uninstall=uninstall, optional=optional,
+        key, name, category, is_installed, install, uninstall=uninstall if removable else None, optional=optional,
         note=(note + " " if note else "") + f"Installed with winget ({winget_id}), which checks the installer against its reviewed manifest hash.",
         location=location,
     )
@@ -214,6 +215,29 @@ def _claude_state() -> InstalledState:
     if version:
         return InstalledState(True, version)
     return _entry_state(r"^Claude$")
+
+
+def _winget_list_state(winget_id: str) -> InstalledState:
+    """Asks winget itself whether a package is installed (slow - a couple of
+    seconds - so only for packages that leave no registry trail we can read,
+    like Microsoft Store apps whose package name we can't verify)."""
+    exe = _winget_exe()
+    if not exe:
+        return InstalledState(installed=False)
+    try:
+        result = subprocess.run(
+            [exe, "list", "--id", winget_id, "-e", "--accept-source-agreements", "--disable-interactivity"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, creationflags=_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return InstalledState(installed=False)
+    for line in (result.stdout or "").splitlines():
+        parts = line.split()
+        if winget_id in parts:
+            index = parts.index(winget_id)
+            version = parts[index + 1] if index + 1 < len(parts) else None
+            return InstalledState(True, version if version and version[0].isdigit() else None)
+    return InstalledState(installed=False)
 
 
 def _msys2_state() -> InstalledState:
@@ -279,11 +303,21 @@ def _terminal_install(ctx: InstallContext) -> bool:
 # Legacy game support: DirectPlay, XNA 4.0, PhysX
 # ---------------------------------------------------------------------------
 
+_DIRECTPLAY_PACKAGE = r"^Microsoft-Windows-DirectPlay-OC-Package~31bf3856ad364e35~amd64~~"
+
+
 def _directplay_state() -> InstalledState:
-    dlls = (SYSTEM_ROOT / "System32" / "dplayx.dll", SYSTEM_ROOT / "SysWOW64" / "dplayx.dll")
-    if not all(dll.is_file() for dll in dlls):
+    # The feature only ever puts the 32-bit dplayx.dll in SysWOW64 (there is no
+    # 64-bit one), and that file can linger when the feature is off - so the
+    # servicing stack's own record is the source of truth, with the DLL as the
+    # fallback if that record can't be read.
+    wow_dll = SYSTEM_ROOT / "SysWOW64" / "dplayx.dll"
+    enabled = checks.cbs_package_state(_DIRECTPLAY_PACKAGE)
+    if enabled is None:
+        enabled = wow_dll.is_file()
+    if not enabled:
         return InstalledState(installed=False)
-    return InstalledState(True, checks.dll_version_field(str(dlls[0]), "ProductVersion"))
+    return InstalledState(True, checks.dll_version_field(str(wow_dll), "ProductVersion"))
 
 
 def _dism_feature(feature: str, enable: bool, ctx: InstallContext) -> bool:
@@ -623,5 +657,43 @@ def build_catalog() -> List[Component]:
         _winget_component(
             "claude", "Claude (desktop app)", "Apps", "Anthropic.Claude", _claude_state,
             note="Installs for the current user and updates itself.",
+        ),
+        _winget_component(
+            "firefox", "Mozilla Firefox", "Apps", "Mozilla.Firefox", lambda: _entry_state(r"^Mozilla Firefox"),
+            note="Updates itself.",
+        ),
+        _winget_component(
+            "edge", "Microsoft Edge", "Apps", "Microsoft.Edge", lambda: _entry_state(r"^Microsoft Edge$"),
+            removable=False, note="Part of Windows 11 - this repairs or updates it; it can't be removed from here.",
+        ),
+        _winget_component(
+            "onedrive", "Microsoft OneDrive", "Apps", "Microsoft.OneDrive", lambda: _entry_state(r"^Microsoft OneDrive$"),
+            note="Installs for the current user.",
+        ),
+        _winget_component(
+            "windowsapp", "Windows App (remote desktop)", "Apps", "Microsoft.WindowsApp",
+            lambda: _winget_list_state("Microsoft.WindowsApp"),
+            note="Microsoft's Remote Desktop / Windows 365 client. Its installed check asks winget, so it's a little slower.",
+        ),
+        _winget_component(
+            "steam", "Steam", "Apps", "Valve.Steam", lambda: _entry_state(r"^Steam$"),
+        ),
+        _winget_component(
+            "epic", "Epic Games Launcher", "Apps", "EpicGames.EpicGamesLauncher", lambda: _entry_state(r"^Epic Games Launcher"),
+        ),
+        _winget_component(
+            "klite", "K-Lite Codec Pack", "Apps", "CodecGuide.K-LiteCodecPack.Standard", lambda: _entry_state(r"^K-Lite Codec Pack"),
+            note="winget installs the Standard edition; any K-Lite edition already installed counts as installed.",
+        ),
+        _winget_component(
+            "irfanview", "IrfanView", "Apps", "IrfanSkiljan.IrfanView", lambda: _entry_state(r"^IrfanView"),
+        ),
+
+        # --- editors (Dev Tools, optional)
+        _winget_component(
+            "notepadpp", "Notepad++", "Dev Tools", "Notepad++.Notepad++", lambda: _entry_state(r"^Notepad\+\+"),
+        ),
+        _winget_component(
+            "sublime", "Sublime Text 4", "Dev Tools", "SublimeHQ.SublimeText.4", lambda: _entry_state(r"^Sublime Text"),
         ),
     ]

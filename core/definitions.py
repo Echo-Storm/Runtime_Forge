@@ -685,7 +685,11 @@ def _vc_is_installed(vc: _VCDef) -> InstalledState:
         # 2015-2022 were all actually installed and invisible to the check
         # above, present here as expected).
         year_label = vc.key.rsplit("_", 1)[0]
-        pattern = re.compile(rf"Visual C\+\+ {re.escape(year_label)}.*\({re.escape(arch)}\)", re.IGNORECASE)
+        # Newer 14.x redistributables call themselves "Visual C++ v14 Redistributable
+        # (x64) - 14.50.35719" rather than "... 2015-2022 ...", and also register
+        # "2022 X64 Additional/Minimum Runtime" entries that must NOT match.
+        year_alt = r"(?:2015-2022|v14)" if year_label == "2015-2022" else re.escape(year_label)
+        pattern = re.compile(rf"Visual C\+\+ {year_alt}.*Redistributable.*\({re.escape(arch)}\)", re.IGNORECASE)
         version = checks.find_dependency_by_display_name(pattern)
         if version:
             return InstalledState(installed=True, version=version)

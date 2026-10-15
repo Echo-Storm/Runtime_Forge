@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from core import path_backup, profiles
+from core import http_cache, path_backup, profiles
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_bundle_dir, get_data_dir
@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         # NOT inherit a stylesheet set only on MainWindow, so confirmation
         # dialogs (profile overwrite, PATH restore, etc.) would otherwise
         # render in plain unthemed Windows chrome against this dark UI.
+        http_cache.configure_disk_cache(self.app_dir / "http_cache.json")
         self._theme_pref = self.settings.value("theme", "system")
         if self._theme_pref not in ("system", "dark", "light"):
             self._theme_pref = "system"
@@ -708,6 +709,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._save_settings()
+        http_cache.flush()
         if self._update_check is not None and self._update_check.isRunning():
             self._update_check.wait(3000)
         if self.install_worker and self.install_worker.isRunning():
