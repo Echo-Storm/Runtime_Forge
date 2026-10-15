@@ -1,11 +1,8 @@
 """
-Generates assets/banner.png — the README hero image. Replaces the original
-banner, which was reused from the predecessor PS1 repo and still said "AIO
-Runtime Dev Tool Installer" in its own baked-in photo text after the rename
-to Runtime Forge; regenerating from scratch (same palette as gen_icon.py)
-keeps banner and icon visually consistent instead of reusing a mismatched
-asset from a different project. Re-run this after changing the app name or
-palette. Requires Pillow (not a runtime dependency, dev-only).
+Generates assets/banner.png — the README hero image — from scratch (same
+palette as gen_icon.py) so banner and icon stay visually consistent. Re-run
+this after changing the app name or palette. Requires Pillow (not a runtime
+dependency, dev-only).
 
 Usage:
     python tools/gen_banner.py

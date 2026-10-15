@@ -5,7 +5,7 @@ ScanWorker runs every component's presence/version check off the UI thread
 (registry reads are cheap but version-resolver calls hit the network, and
 32+ components in a row would otherwise freeze the window on launch).
 
-InstallWorker runs the PS1's Install-Component pattern, extended with real
+InstallWorker installs the selected components one at a time, with real
 update handling: skip only if already installed AND (no version concept, or
 already at the latest version); otherwise run the installer — which for
 every versioned component here (PowerShell/Git/Node/CMake/JDK) upgrades in

@@ -1,9 +1,7 @@
 """
 Live version/URL resolution against GitHub/Adoptium/nodejs.org APIs, with a
-pinned fallback if the API can't be reached — ported from
-Get-LatestGitHubAsset in ALLTHERUNTIMES.ps1, plus equivalents for Adoptium
-and the Node.js dist index (which the PS1 queries inline rather than through
-a shared helper).
+pinned fallback if the API can't be reached: GitHub releases, Adoptium
+(Temurin), and the Node.js dist index.
 
 Every resolver returns a LatestInfo so the version shown in the GUI's
 "Latest Version" column is exactly the version that will be installed if the
@@ -169,10 +167,10 @@ def get_latest_temurin(feature_version: int, fallback_version: str) -> LatestInf
 
 
 def get_latest_adoptium(feature_version: int, fallback_version: str) -> LatestInfo:
-    """The PS1 uses the /installer/latest/... redirect endpoint directly as
-    the download URL without inspecting the resolved version. For the GUI's
-    version column we additionally query the /assets/latest endpoint (same
-    API family) to surface the actual patch version being installed."""
+    """Fallback when Temurin's GitHub releases can't be read. The download URL is
+    the /installer/latest/... redirect endpoint; for the GUI's version column
+    we additionally query /assets/latest (same API family) to surface the
+    actual patch version being installed."""
     log = get_logger()
     install_url = (
         f"https://api.adoptium.net/v3/installer/latest/{feature_version}/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk"

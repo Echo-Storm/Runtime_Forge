@@ -1,9 +1,8 @@
 """
-Runs downloaded .exe/.msi installers, ported from ALLTHERUNTIMES.ps1's
-Run-Exe / Run-Msi. Exit codes 3010/1641/1638 are "success, reboot required/
-pending" from Windows Installer — treated as success same as the original,
-since no install in this list forces an immediate reboot (/norestart
-everywhere).
+Runs downloaded .exe/.msi installers. Exit codes 3010/1641/1638 are
+"success, reboot required/pending" from Windows Installer — treated as
+success, since no install in this list forces an immediate reboot
+(/norestart everywhere).
 """
 
 import subprocess

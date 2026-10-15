@@ -1,19 +1,14 @@
 """
-The component registry — a 1:1 data-driven port of every install block in
-ALLTHERUNTIMES.ps1. Each Component pairs a presence check (is_installed,
-what the PS1 does inline with Test-Path/Get-ItemProperty/Get-Command) with
-an installer closure (install, what the PS1 does with Get-File + Run-Exe/
-Run-Msi) and an optional version resolver (resolve_latest, what the PS1
-does with Get-LatestGitHubAsset/nodejs dist-index/Adoptium — surfaced here
-for the GUI's "Latest Version" column, not present in the console original).
+The component registry. Each Component pairs a presence check (is_installed),
+an installer closure (install: download, verify, run), an optional version
+resolver (resolve_latest — feeds the GUI's "Latest" column and is exactly
+what an install then fetches) and, where one is safe, an uninstall.
 
-Two components (winget, and nothing else) shell out to a single PowerShell
-Add-AppxPackage call — .msixbundle installation has no exe/msi equivalent
-and no ergonomic ctypes/AppX-COM path, so it joins core/signature.py as the
-only other PowerShell touchpoint in an otherwise pure-Python install engine.
-Everything else here runs the vendor's own installer (msiexec.exe, the
+Only winget shells out to PowerShell (a single Add-AppxPackage call —
+.msixbundle installation has no exe/msi equivalent and no ergonomic AppX
+API); everything else runs the vendor's own installer (msiexec.exe, the
 downloaded .exe with its documented silent flags) or a native OS tool
-(dism.exe for the NetFx3 feature) exactly as ALLTHERUNTIMES.ps1 does.
+(dism.exe for the NetFx3 feature).
 """
 
 import hashlib
@@ -244,9 +239,9 @@ def _seven_zip_path(ctx: InstallContext) -> Path:
 
 
 def ensure_seven_zip(ctx: InstallContext) -> Optional[Path]:
-    """DirectX extraction needs 7za.exe. Downloaded/cached the same way the
-    PS1 bootstraps it as its own pseudo-component, but folded in here since
-    nothing else in the GUI's selectable list needs it standalone."""
+    """DirectX extraction needs 7za.exe. Downloaded and cached like every
+    other installer, but kept internal because nothing else in the GUI's
+    selectable list needs it standalone."""
     log = get_logger()
     exe = _seven_zip_path(ctx)
     if exe.is_file():
@@ -1116,8 +1111,8 @@ def _py_is_installed(py: _PyDef) -> InstalledState:
 def _py_resolve_latest(py: _PyDef) -> LatestInfo:
     # No external API call — python.org doesn't publish a simple per-minor-
     # series "latest patch" endpoint, and these versions are deliberately
-    # pinned/refreshed by hand rather than tracked live (same as the PS1
-    # original). "Latest" here just means "what this app would actually
+    # pinned/refreshed by hand rather than tracked live.
+    # "Latest" here just means "what this app would actually
     # install," matching every other resolver's contract in this file.
     return LatestInfo(version=py.full_version, url=py.url, filename=f"python-{py.full_version}-amd64.exe")
 

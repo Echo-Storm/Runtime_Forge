@@ -10,18 +10,19 @@ Runtime Forge
 <img alt="License" src="https://img.shields.io/badge/license-MIT-informational">
 </p>
 
-A Qt6 (PyQt6) desktop GUI for the same install list as the original AIO
-Runtime & Dev Tool Installer
-PowerShell script — one-click install of the legacy and modern runtimes,
-libraries, and dev tools needed for old games, modern apps, and build
-environments on Windows 11 — with a real interface on top instead of a
-console.
+**One window to see, pick and install everything a fresh Windows 11 machine
+(or a machine full of old games) is going to ask for.** Runtime Forge scans
+what's already installed, shows each component's installed and latest version
+side by side, and installs, updates or removes exactly the ones you tick —
+the legacy runtimes old games and installers demand (DirectX 9.0c, VC++ 2005
+and up, .NET Framework 3.5, OpenAL), the modern runtimes apps need (.NET 8–10,
+VC++ 2015–2022, WebView2, Vulkan), and the developer toolchain (Python, JDKs,
+Git, Node, CMake, LLVM, VS Code...). Every download is checked against its
+publisher's signature and/or a SHA-256 before it runs, and nothing is
+installed until you've confirmed.
 
-I write stuff when I get annoyed that something I need doesn't exist. The
-PowerShell version scratched that itch for years; this is the same idea with
-an actual UI on top — see what's already on the machine before touching
-anything, pick exactly what you want, and never wonder what a `-DryRun`
-would have done.
+It started as a PowerShell script and grew a real interface; the PowerShell
+version is long gone and nothing here depends on it.
 
 Author: XechostormX
 
@@ -29,8 +30,8 @@ Screenshot
 ----------
 <p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a searchable component tree with status, installed and latest versions, a filter bar, a log and PATH-backup pane, and a one-click Install button"></p>
 
-What's different from the PowerShell version
-----------------------------------------------
+What it does
+------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
   release exists, what's available) instead of a plain yes/no. All 48
@@ -47,15 +48,14 @@ What's different from the PowerShell version
   runtime piece, every JDK, every Python version, and every dev tool is its
   own checkbox, not an all-or-nothing run.
 - **Dry Run** toggle previews every download/install without touching the
-  system, same as the original's `-DryRun`.
+  system — the whole install runs, minus the download and the install.
 - **Real update handling, not just detection** — checking an "update
-  available" row and clicking Install actually upgrades it (PowerShell,
-  Git, Node, CMake, JDKs all support in-place upgrade via their own
+  available" row and clicking Install actually upgrades it (PowerShell 7,
+  Git, Node, CMake and the JDKs all upgrade in place via their own
   installers); it doesn't just skip because something's already present.
 - **PATH verification** — every install already requests PATH be updated
-  (`ADD_PATH=1`, `PrependPath=1`, etc, the same flags this project's PS1
-  predecessor added specifically to fix silent-install PATH gaps), but a
-  flag can still silently fail to apply. After install, the tool checks
+  (`ADD_PATH=1`, `PrependPath=1`, etc), but a flag can still silently fail
+  to apply — silent installers are famous for it. After install, the tool checks
   whether the install directory is actually on PATH and flags it distinctly
   if not, instead of only confirming the software itself is present.
 - **PATH backups** — one automatic snapshot of the machine + user PATH per
@@ -86,7 +86,7 @@ What's different from the PowerShell version
   from the winget `.msixbundle` install step (Windows has no other ergonomic
   API for it). Authenticode signatures are verified through `WinVerifyTrust`
   directly. Everything else runs `msiexec.exe`, `dism.exe`, or the vendor's
-  own downloaded installer via `subprocess`, exactly like the original.
+  own downloaded installer via `subprocess`.
 - Requests admin elevation automatically via the packaged .exe's embedded
   manifest — no separate elevation batch file. (Run from source without
   elevation and the window works for scanning, Dry Run, profiles and PATH
@@ -194,7 +194,7 @@ runs them all.
 
 What It Installs / Enables
 -----------------------------------------------
-Same list as the original, grouped for the tree view:
+Everything the tree offers, by category (48 components in all):
 
 **Core Runtimes** — winget, .NET Framework 3.5, DirectX June 2010 (full
 legacy DirectX 9.0c via DXSETUP), OpenAL (plants the Legacy compatibility

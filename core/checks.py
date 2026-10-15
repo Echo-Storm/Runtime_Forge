@@ -1,9 +1,7 @@
 """
-Presence-check primitives, ported from the -IsInstalled scriptblocks in
-ALLTHERUNTIMES.ps1 (registry Test-Path / Get-ItemProperty, file Test-Path,
-Get-Command). Each component in definitions.py composes these into its own
-is_installed() check, same as the PS1 composes Test-Path + Get-ItemProperty
-inline per component.
+Presence-check primitives: registry lookups, file/PE-version reads, command
+probes. Each component in definitions.py composes these into its own
+is_installed() check.
 """
 
 import ctypes
@@ -103,8 +101,7 @@ def any_child_dir_matches(base_dir: str, name_prefix: str) -> Optional[Path]:
 def refresh_path_env() -> None:
     """Re-reads PATH from HKLM+HKCU into this process's environment.
     Needed after installers (e.g. winget) modify PATH — a running process
-    otherwise never sees the change, same problem the PS1 patches around
-    after the winget install step.
+    otherwise never sees the change (the winget install step relies on this).
 
     Registry PATH entries can be REG_EXPAND_SZ containing literal %VAR%
     placeholders (confirmed on a real machine: dotnet's own installer

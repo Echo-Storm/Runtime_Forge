@@ -1,9 +1,8 @@
 """
-Download helper, ported from ALLTHERUNTIMES.ps1's Get-File: caches by
-filename, retries up to 3 times with a 5-second delay, and rejects
-implausibly small downloads (usually an error/landing page instead of the
-real installer) as a sanity check that a request exception alone wouldn't
-catch.
+Download helper: caches by filename, retries up to 3 times with a 5-second
+delay, rejects implausibly small or truncated downloads (usually an
+error/landing page instead of the real installer), and verifies each file's
+SHA-256 and/or Authenticode signer before it can be run.
 """
 
 import hashlib

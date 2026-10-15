@@ -1,9 +1,8 @@
 """
-Timestamped console + file logging, ported from ALLTHERUNTIMES.ps1's
-Log/Log-Status/Log-Success/Log-Skip/Log-Fail/Log-Dry functions.
+Timestamped console + file logging (status / success / skip / fail / dry-run
+lines, one log file per run, newest 10 kept).
 
-Unlike the PS1 (one log file per run, kept forever minus the last 10), the
-GUI also needs log lines routed to an in-app QTextEdit — callers subscribe
+The GUI also needs log lines routed to an in-app QTextEdit — callers subscribe
 via add_listener() rather than the module owning any Qt objects, so this
 file stays free of Qt imports.
 """
@@ -74,7 +73,7 @@ class Logger:
         self._log(f"[ DRY] {msg}")
 
     def _prune_old_logs(self) -> None:
-        """Keep only the 10 most recent run logs, same as the PS1's cleanup step."""
+        """Keep only the 10 most recent run logs."""
         try:
             logs = sorted(
                 self.app_dir.glob("RuntimeForge_Log_*.txt"),
