@@ -27,7 +27,7 @@ Author: XechostormX
 
 Screenshot
 ----------
-<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a left sidebar with Selection, Profiles, and PATH Backups panels next to the component tree, which takes up most of the window"></p>
+<p align="center"><img src="assets/screenshot.png" alt="Runtime Forge main window — a searchable component tree with status, installed and latest versions, a filter bar, a log and PATH-backup pane, and a one-click Install button"></p>
 
 What's different from the PowerShell version
 ----------------------------------------------

@@ -49,21 +49,21 @@ def run_test():
 
         results["selection_before_save"] = window._selected_keys() == set(keys_to_select)
         results["combo_is_custom_after_manual_edit"] = window.profile_combo.currentIndex() == 0
-        results["update_btn_disabled_no_active_profile"] = not window.profile_update_btn.isEnabled()
+        results["update_btn_disabled_no_active_profile"] = not window.profile_update_action.isEnabled()
 
         window._write_profile(TEST_PROFILE_NAME)
         results["profile_appears_in_combo"] = window.profile_combo.findText(TEST_PROFILE_NAME) > 0
         results["combo_selected_after_save"] = window._current_profile_name() == TEST_PROFILE_NAME
-        results["update_btn_enabled_after_save"] = window.profile_update_btn.isEnabled()
-        results["delete_btn_enabled_after_save"] = window.profile_delete_btn.isEnabled()
+        results["update_btn_enabled_after_save"] = window.profile_update_action.isEnabled()
+        results["delete_btn_enabled_after_save"] = window.profile_delete_action.isEnabled()
 
         # The real-world Update flow: profile is active, then EDIT the
         # selection (resets combo to Custom), then click Update. This is
         # the exact scenario that was broken before the fix.
         window.tree_items["cmake"].setCheckState(0, Qt.CheckState.Checked)
         results["combo_reset_to_custom_after_edit"] = window.profile_combo.currentIndex() == 0
-        results["update_btn_still_enabled_after_edit"] = window.profile_update_btn.isEnabled()
-        results["delete_btn_disabled_after_edit"] = not window.profile_delete_btn.isEnabled()
+        results["update_btn_still_enabled_after_edit"] = window.profile_update_action.isEnabled()
+        results["delete_btn_disabled_after_edit"] = not window.profile_delete_action.isEnabled()
 
         window._on_update_profile()
         updated = [p for p in window._profiles_cache if p.name == TEST_PROFILE_NAME][0]
@@ -78,8 +78,8 @@ def run_test():
 
         window._on_delete_profile()
         results["profile_removed_from_combo"] = window.profile_combo.findText(TEST_PROFILE_NAME) == -1
-        results["update_btn_disabled_after_delete_active"] = not window.profile_update_btn.isEnabled()
-        results["delete_btn_disabled_on_custom"] = not window.profile_delete_btn.isEnabled()
+        results["update_btn_disabled_after_delete_active"] = not window.profile_update_action.isEnabled()
+        results["delete_btn_disabled_on_custom"] = not window.profile_delete_action.isEnabled()
 
     except Exception as e:
         import traceback

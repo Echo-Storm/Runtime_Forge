@@ -1,3 +1,4 @@
+import os
 # -*- mode: python ; coding: utf-8 -*-
 #
 # PyInstaller spec for Runtime Forge — onedir (folder) build.
@@ -48,7 +49,9 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/icon.ico',
-    uac_admin=True,
+    # Set RF_NO_ADMIN=1 to build a copy that doesn't demand elevation (for
+    # testing the UI); release builds must leave it unset.
+    uac_admin=os.environ.get('RF_NO_ADMIN') != '1',
 )
 
 coll = COLLECT(

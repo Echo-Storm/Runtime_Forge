@@ -1731,7 +1731,7 @@ def build_components() -> List[Component]:
 
     for vc in _VC_DEFS:
         components.append(Component(
-            f"vc_{vc.key}", f"VC++ Redistributable {vc.key}", "VC++ Redistributables",
+            f"vc_{vc.key}", f"Visual C++ {vc.key.rsplit('_', 1)[0]} ({vc.key.rsplit('_', 1)[1]})", "VC++ Redistributables",
             lambda vc=vc: _vc_is_installed(vc),
             lambda ctx, vc=vc: _vc_install(vc, ctx),
         ))

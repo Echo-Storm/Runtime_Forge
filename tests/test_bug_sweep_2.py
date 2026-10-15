@@ -54,7 +54,7 @@ def after_scan():
         selected_after_import = {k for k, item in window.tree_items.items() if item.checkState(0) == Qt.CheckState.Checked}
         results["import_applies_keys_to_tree"] = selected_after_import == {"node", "python_3.13"}
         results["import_sets_active_profile_name"] = window._active_profile_name == "Imported Test Profile"
-        results["import_enables_update_button"] = window.profile_update_btn.isEnabled()
+        results["import_enables_update_button"] = window.profile_update_action.isEnabled()
 
         profiles.delete_profile(app_dir, "Imported Test Profile")
         import_path.unlink(missing_ok=True)
