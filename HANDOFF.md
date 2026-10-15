@@ -1,15 +1,15 @@
 # Runtime Forge — handoff notes
 
-For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for v0.4.1.
+For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for v0.4.2.
 
 ## Where things stand
 
 - **App:** PyQt6 desktop GUI that scans, installs, updates and uninstalls 72 Windows
   runtimes / dev tools / apps. Dark + light theme (follows Windows). See `README.md`.
 - **Repo:** <https://github.com/Echo-Storm/Runtime_Forge>, branch `main`, public.
-- **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1 (v0.1.0 was deleted — its installer had been
-  built from a stale `dist/`). Latest is v0.4.1.
-- **Tests:** 24 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
+- **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.4.2 (v0.1.0 was deleted — its installer had been
+  built from a stale `dist/`). Latest is v0.4.2.
+- **Tests:** 25 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
 - **First real run (v0.4.0, elevated, on the author's machine — see the log summary below):**
   13 installs succeeded, 3 were falsely reported failed (DirectPlay, VC++ 2015-2022 x86/x64 —
   detection bugs, fixed in 0.4.1). The log lives in `%LOCALAPPDATA%\RuntimeForge\RuntimeForge_Log_*.txt`.
@@ -74,9 +74,10 @@ assets/                 icon, banner, screenshots, tick/dash/chevron images, Win
    (use `PyInstaller.archive.readers.ZlibArchiveReader`), `dist\RuntimeForge\_internal\assets`
    has every image + `windows_terminal_settings.json`, and the exe contains `requireAdministrator`.
 5. Smoke-test a non-elevated build: `set RF_NO_ADMIN=1`, build with
-   `--distpath dist_test --workpath build_test`, launch it, confirm a log appears in
-   `%LOCALAPPDATA%\RuntimeForge` and it scans; kill it; delete `dist_test`, `build_test`, and
-   `%LOCALAPPDATA%\RuntimeForge` (only if it didn't exist before).
+   `--distpath dist_test --workpath build_test`, launch it with `RUNTIME_FORGE_DATA_DIR=<temp dir>` (so it
+   never touches your real data) and **no** `GITHUB_TOKEN`, confirm a log appears, the scan completes with no
+   "Could not query GitHub" lines (that proves the published catalog is being used), then kill it and delete
+   `dist_test`, `build_test` and the temp dir.
 6. Installer: `"%LOCALAPPDATA%\Programs\Inno Setup 7\ISCC.exe" installer\RuntimeForge.iss`
    → `dist_installer\RuntimeForge-Setup-<ver>.exe`.
 7. `git push`, then `gh release create v<ver> dist_installer\RuntimeForge-Setup-<ver>.exe --target main --title ... --notes ...`.
@@ -139,7 +140,7 @@ Found and fixed in 0.4.1:
 - [ ] **Make the newest Python the default** (☰ menu) on a machine with several on PATH — the plan was
       dry-run against the author's real PATH and unit-tested, but never applied elevated.
 
-## Python default (v0.4.2, unreleased)
+## Python default (v0.4.2)
 
 `core/python_default.py` — discovery via PEP 514 (`HKLM/HKCU\SOFTWARE\Python\PythonCore`), a pure
 `plan_make_default()` and `apply_plan()` (writes through `path_backup.write_paths`). Installs only pass

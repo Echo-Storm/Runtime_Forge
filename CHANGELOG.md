@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2
 - **Only the newest Python is the default.** Installing Python no longer puts every
   version on PATH (the last one installed used to win): only the newest series gets
   `PrependPath`, the older ones stay reachable with `py -3.12`.
