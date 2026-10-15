@@ -1,0 +1,14 @@
+name: Feature request
+description: An idea to make Runtime Forge better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What are you doing today instead?

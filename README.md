@@ -4,10 +4,23 @@ Runtime Forge
 ======================
 
 <p align="center">
-<img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2011-0078D6">
+<a href="https://github.com/Echo-Storm/Runtime_Forge/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Echo-Storm/Runtime_Forge?label=release&color=1a73d9"></a>
+<a href="https://github.com/Echo-Storm/Runtime_Forge/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Echo-Storm/Runtime_Forge/total?color=1b8a50"></a>
+<a href="https://github.com/Echo-Storm/Runtime_Forge/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Echo-Storm/Runtime_Forge?style=flat&color=e0b04f"></a>
+<img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6">
 <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
 <img alt="PyQt6" src="https://img.shields.io/badge/UI-PyQt6-41CD52">
-<img alt="License" src="https://img.shields.io/badge/license-MIT-informational">
+<a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-informational"></a>
+<a href="https://github.com/Echo-Storm/Runtime_Forge/actions/workflows/update-versions.yml"><img alt="Version catalog" src="https://img.shields.io/github/actions/workflow/status/Echo-Storm/Runtime_Forge/update-versions.yml?label=version%20catalog"></a>
+<img alt="Last commit" src="https://img.shields.io/github/last-commit/Echo-Storm/Runtime_Forge">
+</p>
+
+<p align="center">
+<b><a href="https://github.com/Echo-Storm/Runtime_Forge/releases/latest">⬇&nbsp;Download the installer</a></b>
+&nbsp;·&nbsp; <a href="https://github.com/Echo-Storm/Runtime_Forge/releases/latest">Portable zip</a>
+&nbsp;·&nbsp; <a href="CHANGELOG.md">Changelog</a>
+&nbsp;·&nbsp; <a href="https://github.com/Echo-Storm/Runtime_Forge/discussions">Discussions</a>
+&nbsp;·&nbsp; <a href="https://github.com/Echo-Storm/Runtime_Forge/issues/new/choose">Report a bug / suggest a tool</a>
 </p>
 
 **One window to see, pick and install everything a fresh Windows 11 machine
@@ -126,6 +139,40 @@ Using the app
   (☰ → "Check for app updates" turns it off).
 - **Make the newest Python the default:** ☰ menu — see *Python* below.
 - Shortcuts: Ctrl+F search, Ctrl+R rescan.
+
+Quick start
+-----------
+1. Download **`RuntimeForge-Setup-<version>.exe`** from the [latest release](https://github.com/Echo-Storm/Runtime_Forge/releases/latest)
+   (or the portable zip — unzip anywhere; it keeps its data beside the exe) and run it. Windows asks
+   for administrator rights, and SmartScreen may warn because the app isn't code-signed yet.
+2. It scans your machine on launch. Click **Select needed** to tick what's missing or outdated, or
+   tick things yourself — everything is listed with what's installed and what's current.
+3. Turn on **Dry run** if you'd like to see exactly what would be downloaded and run first, then hit
+   **Install**. Installers are verified before they run and PATH is backed up first.
+
+FAQ
+---
+**Is it safe to run?** Every installer is checked against the publisher's Authenticode signature
+and/or a SHA-256 before it runs (and again right before execution), PATH is backed up before any
+install, and nothing installs until you confirm. See [SECURITY.md](SECURITY.md) for the details and
+the limits. The code is MIT-licensed and short enough to read.
+
+**Why does it want administrator rights?** Most runtimes install into Program Files, the registry or
+System32. The window still works without them for scanning, Dry run, profiles and PATH backups.
+
+**Does it send anything anywhere?** No telemetry. It talks to the vendors' own download and
+version-lookup hosts, and to GitHub for the version catalog and the "newer release" notice (which you
+can switch off in the ☰ menu).
+
+**Can it fix my "which Python is `python`?" mess?** Yes — ☰ → *Make the newest Python the default…*
+puts the newest python.org Python first on PATH and takes the others off it (nothing is uninstalled;
+`py -3.12` still reaches the older ones).
+
+**An old game wants DirectX 9 / VC++ 2008 / .NET 3.5 / OpenAL / DirectPlay / XNA.** Those are exactly
+what the *Core Runtimes*, *Legacy Game Support* and *VC++ Redistributables* groups are for.
+
+**A tool I need isn't listed.** [Suggest it](https://github.com/Echo-Storm/Runtime_Forge/issues/new?template=component_request.yml)
+— anything with a winget ID is a few lines to add (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 Running from source
 --------------------
@@ -354,6 +401,10 @@ re-signing or republishing. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to lift
 GitHub's 60-requests-an-hour unauthenticated limit; the token is only ever
 sent to `api.github.com`.
 
-Support
--------
+Contributing & support
+----------------------
+Bug reports, tool suggestions and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md); security
+issues go through [SECURITY.md](SECURITY.md). Questions and show-and-tell live in
+[Discussions](https://github.com/Echo-Storm/Runtime_Forge/discussions).
+
 If this is useful, a Ko-fi helps a lot: [ko-fi.com/xechostormx](https://ko-fi.com/xechostormx) ♥

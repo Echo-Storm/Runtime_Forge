@@ -1,0 +1,52 @@
+name: Bug report
+description: Something didn't install, was detected wrongly, or the app misbehaved
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The **log file** answers most questions: open it from the app (☰ → Open log folder),
+        or find it in `%LOCALAPPDATA%\RuntimeForge\RuntimeForge_Log_*.txt`.
+  - type: input
+    id: version
+    attributes:
+      label: Runtime Forge version
+      description: Shown in the window title.
+      placeholder: "0.4.2"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2 (build 26100)"
+    validations:
+      required: true
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Ran as administrator?
+      options: ["Yes (installed app / UAC prompt accepted)", "No", "Not sure"]
+    validations:
+      required: true
+  - type: input
+    id: component
+    attributes:
+      label: Component(s) involved
+      placeholder: "e.g. DirectPlay, Python 3.13, Rust"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines
+      description: Paste the lines around the problem (they contain no personal data beyond file paths).
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else (screenshots, third-party installers already on the machine, proxies/VPN...)
