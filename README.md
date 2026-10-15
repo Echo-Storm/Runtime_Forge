@@ -104,8 +104,8 @@ scanning and Dry Run.
 Building the .exe
 ------------------
 ```
-venv\Scripts\pip install pyinstaller
-venv\Scripts\pyinstaller.exe RuntimeForge.spec --clean
+venv\Scripts\python.exe -m pip install pyinstaller
+venv\Scripts\python.exe -m PyInstaller RuntimeForge.spec --clean
 ```
 Output lands in `dist\RuntimeForge\` — copy the whole folder to
 distribute. Running that folder directly is portable: settings
