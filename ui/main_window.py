@@ -72,7 +72,7 @@ def build_app_stylesheet() -> str:
 
 class MainWindow(QMainWindow):
     APP_NAME = "Runtime Forge"
-    APP_VERSION = "0.4.0"
+    APP_VERSION = "0.4.1"
 
     def __init__(self):
         super().__init__()
