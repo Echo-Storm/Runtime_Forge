@@ -37,7 +37,7 @@ FONT_UI = '"Segoe UI Variable Text", "Segoe UI", Arial, sans-serif'
 FONT_MONO = '"Cascadia Mono", "Consolas", "Courier New", monospace'
 
 
-def build_stylesheet(check_icon: str = "", dash_icon: str = "") -> str:
+def build_stylesheet(check_icon: str = "", dash_icon: str = "", chevron_right: str = "", chevron_down: str = "") -> str:
     """`check_icon` / `dash_icon`: white PNGs drawn inside checked / partly-checked boxes."""
     return f"""
 * {{
@@ -273,6 +273,25 @@ QTreeWidget::item:selected {{
 }}
 QTreeView::branch {{
     background: transparent;
+    border-image: none;
+    image: none;
+}}
+QTreeView::branch:selected {{
+    background-color: {ACCENT_BG};
+    image: none;
+    border-image: none;
+}}
+QTreeView::branch:closed:has-children {{
+    image: url({chevron_right});
+}}
+QTreeView::branch:open:has-children {{
+    image: url({chevron_down});
+}}
+QTreeView::branch:selected:closed:has-children {{
+    image: url({chevron_right});
+}}
+QTreeView::branch:selected:open:has-children {{
+    image: url({chevron_down});
 }}
 
 QHeaderView::section {{

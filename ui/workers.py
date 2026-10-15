@@ -33,12 +33,24 @@ MAX_SCAN_WORKERS = 8
 class ScanWorker(QThread):
     component_scanned = pyqtSignal(str, object, object)  # key, InstalledState, LatestInfo|None
     finished_scan = pyqtSignal()
+    log_line = pyqtSignal(str)
 
     def __init__(self, components: list[Component], parent=None):
         super().__init__(parent)
         self.components = components
 
     def run(self):
+        # Same identity-capture discipline as InstallWorker.run(): the bound
+        # signal's .emit is a fresh object on every attribute access, so
+        # remove_listener() needs the exact one add_listener() was given.
+        listener = self.log_line.emit
+        get_logger().add_listener(listener)
+        try:
+            self._scan_all()
+        finally:
+            get_logger().remove_listener(listener)
+
+    def _scan_all(self):
         # Each component is one independent task: its presence check (a
         # registry/file read, or a short subprocess for tools that must be
         # run to report a version - pwsh, git, node, cmake) and, for
@@ -95,10 +107,12 @@ class InstallWorker(QThread):
     log_line = pyqtSignal(str)
     all_finished = pyqtSignal(int, int, int)                    # installed, skipped, failed
 
-    def __init__(self, components: list[Component], selected_keys: set[str], dry_run: bool, parent=None):
+    def __init__(self, components: list[Component], selected_keys: set[str], dry_run: bool, parent=None, force: bool = False):
         super().__init__(parent)
         self.components = [c for c in components if c.key in selected_keys]
         self.dry_run = dry_run
+        # force: run the installer even when the component is already present and current (Reinstall)
+        self.force = force
         self._cancel_requested = False
 
     def request_cancel(self):
@@ -163,7 +177,7 @@ class InstallWorker(QThread):
                 log.status(f"WARNING: {component.name} presence check raised an exception ({e}) - treating as not installed")
                 state = InstalledState(installed=False)
 
-            if state.installed:
+            if state.installed and not self.force:
                 update_available = False
                 update_check_failed = False
                 if component.resolve_latest is not None:

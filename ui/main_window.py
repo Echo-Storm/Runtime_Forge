@@ -17,12 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, QSettings, QUrl
+from PyQt6.QtCore import QEvent, QObject, Qt, QSettings, QUrl
 from PyQt6.QtGui import QAction, QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMenu, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSplitter,
+    QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QStatusBar, QTabWidget, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -69,6 +69,8 @@ def build_app_stylesheet() -> str:
     return theme.build_stylesheet(
         check_icon=(assets / "check.png").as_posix(),
         dash_icon=(assets / "dash.png").as_posix(),
+        chevron_right=(assets / "chevron_right.png").as_posix(),
+        chevron_down=(assets / "chevron_down.png").as_posix(),
     )
 
 
@@ -109,6 +111,7 @@ class MainWindow(QMainWindow):
         self._filter_mode = FILTER_ALL
         self._install_total = 0
         self._install_done = 0
+        self._install_results: dict[str, ResultStatus] = {}
 
         settings_path = str(self.app_dir / "RuntimeForge.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
@@ -128,6 +131,7 @@ class MainWindow(QMainWindow):
         self._refresh_path_backup_combo()
         self._update_selection_ui()
         self._start_scan()
+        self.tree.setFocus()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -158,7 +162,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.bottom_tabs)
         self.splitter.setStretchFactor(0, 5)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([520, 150])
+        self.splitter.setSizes([470, 210])
         root.addWidget(self.splitter, stretch=1)
 
         root.addWidget(self._build_action_bar())
@@ -322,21 +326,46 @@ class MainWindow(QMainWindow):
         tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         tree.setMouseTracking(True)
         tree.itemChanged.connect(self._on_tree_item_changed)
+        tree.currentItemChanged.connect(lambda current, _previous: self._show_details(current))
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+
+        # Shown over the tree when a search/filter leaves nothing to display.
+        self.empty_label = QLabel("No components match your search or filter.", tree.viewport())
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setStyleSheet(f"color: {theme.TEXT_DIM}; background: transparent;")
+        self.empty_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.empty_label.hide()
+        self._viewport_filter = _ResizeFilter(lambda: self.empty_label.setGeometry(tree.viewport().rect()), tree)
+        tree.viewport().installEventFilter(self._viewport_filter)
         return tree
 
     def _build_bottom_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         tabs.setDocumentMode(False)
 
+        # --- Details (what the selected row actually is) ---
+        self.details_label = QLabel()
+        self.details_label.setTextFormat(Qt.TextFormat.RichText)
+        self.details_label.setWordWrap(True)
+        self.details_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.details_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.details_label.setMargin(10)
+        self.details_label.setStyleSheet(f"background-color: {theme.SURFACE};")
+        details_scroll = QScrollArea()
+        details_scroll.setWidgetResizable(True)
+        details_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        details_scroll.setWidget(self.details_label)
+        self.details_tab_index = tabs.addTab(details_scroll, "Details")
+        self._show_details(None)
+
         # --- Log ---
         self.log_view = QTextEdit()
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("Install and scan output appears here.")
-        tabs.addTab(self.log_view, "Log")
+        self.log_tab_index = tabs.addTab(self.log_view, "Log")
 
         # --- PATH backups ---
         page = QWidget()
@@ -649,6 +678,7 @@ class MainWindow(QMainWindow):
         self.scan_worker = ScanWorker(self.components, self)
         self.scan_worker.component_scanned.connect(self._on_component_scanned)
         self.scan_worker.finished_scan.connect(self._on_scan_finished)
+        self.scan_worker.log_line.connect(self._on_log_line)
         self.scan_worker.start()
 
     @staticmethod
@@ -757,6 +787,9 @@ class MainWindow(QMainWindow):
 
         if filtering:
             self.tree.expandAll()
+        any_leaf_visible = any(not item.isHidden() for item in self.tree_items.values())
+        self.empty_label.setVisible(not any_leaf_visible)
+        self.empty_label.setGeometry(self.tree.viewport().rect())
 
     def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         """Double-clicking a row toggles it - a much bigger target than the checkbox."""
@@ -781,9 +814,22 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
 
+        latest = result[1] if result else None
+        if state is not None and not self._is_busy():
+            if not state.installed:
+                menu.addAction("Install").triggered.connect(lambda: self._start_install({key}))
+            elif self._has_update(state, latest):
+                menu.addAction(f"Update to {latest.version}").triggered.connect(lambda: self._start_install({key}))
+            else:
+                menu.addAction("Reinstall").triggered.connect(lambda: self._start_install({key}, force=True))
+            menu.addSeparator()
+
         if state is not None and state.installed and component.path_entry is not None:
             open_action = menu.addAction("Open install location")
             open_action.triggered.connect(lambda: self._open_install_location(component))
+
+        if latest is not None and latest.url:
+            menu.addAction("Copy download URL").triggered.connect(lambda: QApplication.clipboard().setText(latest.url))
 
         if state is not None and state.version:
             copy_action = menu.addAction("Copy version")
@@ -1261,24 +1307,38 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_install_clicked(self):
-        selected = self._selected_keys()
+        self._start_install(self._selected_keys())
+
+    def _confirm_install(self, selected: set, dry_run: bool) -> bool:
+        names = [c.name for c in self.components if c.key in selected]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Confirm Install")
+        box.setText(f"Install {len(names)} component{'s' if len(names) != 1 else ''}?")
+        box.setInformativeText(
+            "This downloads each installer, verifies it, and runs it. It may change the registry, "
+            "PATH and Program Files; a PATH backup is taken first."
+        )
+        box.setDetailedText("\n".join(f"•  {n}" for n in names))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        return box.exec() == QMessageBox.StandardButton.Yes
+
+    def _start_install(self, selected: set, force: bool = False):
         if not selected:
             QMessageBox.information(self, "Nothing Selected", "Check at least one component to install.")
             return
+        if self._is_busy():
+            QMessageBox.information(self, "Busy", "Wait for the current install/uninstall/scan to finish first.")
+            return
 
         dry_run = self.dry_run_checkbox.isChecked()
-        if not dry_run:
-            reply = QMessageBox.question(
-                self, "Confirm Install",
-                f"Install {len(selected)} selected component(s)? This will download and run installers, "
-                "and may modify the registry, PATH, and System32.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+        if not dry_run and not self._confirm_install(selected, dry_run):
+            return
 
         self._install_total = len(selected)
         self._install_done = 0
+        self._install_results = {}
         self._set_selection_controls_visible(False)
         self.install_btn.setEnabled(False)
         self.rescan_btn.setEnabled(False)
@@ -1287,9 +1347,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(f"0 of {self._install_total}")
         self.log_view.clear()
-        self.bottom_tabs.setCurrentIndex(0)
+        self.bottom_tabs.setCurrentIndex(self.log_tab_index)
 
-        self.install_worker = InstallWorker(self.components, selected, dry_run, self)
+        self.install_worker = InstallWorker(self.components, selected, dry_run, self, force=force)
         self.install_worker.component_started.connect(self._on_component_started)
         self.install_worker.component_progress.connect(self._on_component_progress)
         self.install_worker.component_finished.connect(self._on_component_finished)
@@ -1328,6 +1388,7 @@ class MainWindow(QMainWindow):
 
     def _on_component_finished(self, key: str, status: ResultStatus, warning: str):
         self._install_done += 1
+        self._install_results[key] = status
         self._set_overall_progress(0.0)
         item = self.tree_items.get(key)
         if item is None:
@@ -1361,6 +1422,57 @@ class MainWindow(QMainWindow):
             item.setText(COL_INSTALLED, state.version or "–")
             self._update_category_summaries()
 
+    def _show_details(self, item: Optional[QTreeWidgetItem]):
+        """Fills the Details tab for the highlighted row."""
+        key = item.data(COL_NAME, Qt.ItemDataRole.UserRole) if item is not None else None
+        component = self.component_by_key.get(key) if key else None
+        dim, text = theme.TEXT_DIM, theme.TEXT
+        if component is None:
+            if item is not None and item.parent() is None:
+                body = f'<span style="color:{dim}">{html.escape(item.text(COL_NAME))} — {html.escape(item.text(COL_STATUS)) or "scanning…"}</span>'
+            else:
+                body = f'<span style="color:{dim}">Select a component to see what it is, where it lives and what version it would install.</span>'
+            self.details_label.setText(body)
+            return
+
+        result = self._scan_results.get(key)
+        state, latest = result if result else (None, None)
+        rows = [("Category", component.category)]
+        if state is None:
+            rows.append(("Status", "Checking…"))
+        elif state.installed:
+            rows.append(("Installed", state.version or "yes (version unknown)"))
+        else:
+            rows.append(("Installed", "no"))
+        if latest is not None:
+            label = "Latest"
+            value = latest.version
+            if self._has_update(state, latest) if state else False:
+                value += f'  <span style="color:{theme.WARN}">(update available)</span>'
+            rows.append((label, value))
+            if latest.url:
+                rows.append(("Downloads from", html.escape(latest.url)))
+            if latest.sha256:
+                rows.append(("SHA-256", f'<span style="font-family:Consolas">{latest.sha256}</span>'))
+        if component.path_entry is not None:
+            try:
+                entry = component.path_entry()
+            except Exception:
+                entry = None
+            if entry is not None:
+                rows.append(("Install location", html.escape(str(entry))))
+        rows.append(("Can uninstall", "yes" if component.uninstall is not None else "no — Windows or other software may depend on it"))
+
+        table = "".join(
+            f'<tr><td style="color:{dim}; padding-right:18px; vertical-align:top">{k}</td>'
+            f'<td style="color:{text}">{v if k in ("Installed", "Latest", "SHA-256") else v}</td></tr>'
+            for k, v in rows
+        )
+        self.details_label.setText(
+            f'<div style="font-size:12pt; font-weight:600; color:{text}">{html.escape(component.name)}</div>'
+            f'<table cellspacing="4" style="margin-top:6px">{table}</table>'
+        )
+
     _LOG_COLORS = (
         ("[FAIL]", theme.ERR), ("WARNING", theme.WARN), ("[ OK ]", theme.OK),
         ("[SKIP]", theme.TEXT_FAINT), ("[ DRY]", theme.ACCENT),
@@ -1388,8 +1500,30 @@ class MainWindow(QMainWindow):
         if not was_dry_run:
             self._refresh_path_backup_combo()  # a real run just created a new one
 
-        QMessageBox.information(
-            self, "Install Complete",
-            f"Installed: {installed}\nSkipped (already present): {skipped}\nFailed: {failed}\n\n"
-            f"Log saved to: {self.logger.log_file}",
-        )
+        failed_names = [
+            self.component_by_key[k].name for k, st in self._install_results.items()
+            if st == ResultStatus.FAILED and k in self.component_by_key
+        ]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information)
+        box.setWindowTitle("Install Complete" if not was_dry_run else "Dry Run Complete")
+        box.setText(f"Installed: {installed}    Skipped: {skipped}    Failed: {failed}")
+        extra = ("Failed:\n" + "\n".join(f"•  {n}" for n in failed_names) + "\n\n") if failed_names else ""
+        box.setInformativeText(f"{extra}Log saved to:\n{self.logger.log_file}")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+        self._show_details(self.tree.currentItem())
+
+
+class _ResizeFilter(QObject):
+    """Calls `callback` whenever the watched widget is resized (used to keep
+    the empty-state label covering the tree's viewport)."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            self._callback()
+        return False

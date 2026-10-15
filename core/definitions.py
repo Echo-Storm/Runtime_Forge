@@ -909,7 +909,9 @@ _ADOPTIUM_ROOT = PROGRAM_FILES / "Eclipse Adoptium"
 
 def _jdk_is_installed(jd: _JdkDef) -> InstalledState:
     match = checks.any_child_dir_matches(str(_ADOPTIUM_ROOT), jd.dir_prefix)
-    return InstalledState(installed=bool(match), version=match.name if match else None)
+    # The folder is "jdk-21.0.12.8-hotspot"; show just the version part.
+    version = re.sub(r"^jdk-?|-hotspot$", "", match.name) if match else None
+    return InstalledState(installed=bool(match), version=version)
 
 
 def _jdk_path_entry(jd: _JdkDef) -> Optional[Path]:

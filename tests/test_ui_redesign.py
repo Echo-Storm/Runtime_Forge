@@ -147,6 +147,66 @@ results["failure_lines_colored_red"] = mw.theme.ERR.lower() in html_out.lower()
 results["success_lines_colored_green"] = mw.theme.OK.lower() in html_out.lower()
 results["log_text_is_escaped"] = "<b>x</b>" in window.log_view.toPlainText()
 
+
+# ---- details tab
+git_item = items["git"]
+window._on_component_scanned("git", InstalledState(True, "2.40.0"), LatestInfo("2.50.0", "https://example.test/Git.exe", "Git.exe", "ab" * 32))
+window.tree.setCurrentItem(git_item)
+details = window.details_label.text()
+results["details_shows_component_name"] = "Git for Windows" in details
+results["details_shows_versions_and_update"] = "2.40.0" in details and "2.50.0" in details and "update available" in details
+results["details_shows_source_url_and_hash"] = "https://example.test/Git.exe" in details and ("ab" * 32) in details
+results["details_shows_install_location"] = "Install location" in details
+window.tree.setCurrentItem(window.category_items[cat_of["git"]])
+results["details_for_category_row_is_summary"] = "Dev Tools" in window.details_label.text()
+window._show_details(None)
+results["details_empty_state_prompts_selection"] = "Select a component" in window.details_label.text()
+
+# ---- empty filter state
+window.search_box.setText("zzz-no-such-component")
+results["empty_state_shown_when_nothing_matches"] = window.empty_label.isVisibleTo(window.tree.viewport()) or not window.empty_label.isHidden()
+window.search_box.setText("")
+results["empty_state_hidden_when_rows_visible"] = window.empty_label.isHidden()
+
+# ---- per-row actions are offered in the right situations
+class _Recorder:
+    def __init__(self):
+        self.started = []
+
+window._start_install_calls = []
+real_start = window._start_install
+window._start_install = lambda selected, force=False: window._start_install_calls.append((set(selected), force))
+captured = {}
+
+from PyQt6.QtWidgets import QMenu
+real_exec = QMenu.exec
+QMenu.exec = lambda self, *a, **k: captured.setdefault("labels", [a.text() for a in self.actions() if a.text()]) and None
+
+
+def context_labels(key):
+    captured.clear()
+    window._scan_results[key] = window._scan_results[key]
+    item = window.tree_items[key]
+    pos = window.tree.visualItemRect(item).center()
+    window._on_tree_context_menu(pos)
+    return captured.get("labels", [])
+
+
+window.tree.scrollToItem(items[missing])
+missing_labels = context_labels(missing)
+outdated_labels = context_labels(installed_outdated)
+current_labels = context_labels(installed_current)
+QMenu.exec = real_exec
+results["context_menu_offers_install_for_missing"] = "Install" in missing_labels
+results["context_menu_offers_update_for_outdated"] = any(l.startswith("Update to") for l in outdated_labels)
+results["context_menu_offers_reinstall_for_current"] = "Reinstall" in current_labels
+window._start_install = real_start
+
+# ---- force flag reaches the worker; Reinstall doesn't skip a current component
+from ui.workers import InstallWorker
+w = InstallWorker(window.components, {installed_current}, True, None, force=True)
+results["install_worker_stores_force_flag"] = w.force is True and InstallWorker(window.components, set(), True).force is False
+
 # ---- friendly component names
 vc_names = [c.name for c in window.components if c.category == "VC++ Redistributables"]
 results["vc_names_are_readable"] = "Visual C++ 2005 (x86)" in vc_names and len(set(vc_names)) == len(vc_names)
