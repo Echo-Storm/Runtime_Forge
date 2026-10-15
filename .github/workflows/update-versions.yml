@@ -1,0 +1,38 @@
+name: Update versions.json
+
+# Resolves the latest version, download URL and SHA-256 of every GitHub-hosted
+# component and commits data/versions.json, which the app reads instead of
+# calling api.github.com ~20 times per scan (see core/published.py).
+on:
+  schedule:
+    - cron: "17 5 * * *"      # daily, 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: windows-latest   # the app's modules import Windows-only APIs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install requests
+      - name: Resolve latest versions
+        run: python tools/update_versions.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit if changed
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/versions.json
+          if git diff --cached --quiet; then
+            echo "versions.json unchanged"
+          else
+            git commit -m "Refresh versions.json"
+            git push
+          fi
