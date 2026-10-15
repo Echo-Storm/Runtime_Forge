@@ -29,7 +29,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from core import checks, http_cache, path_backup
+from core import checks, http_cache, path_backup, published
 from core.definitions import (
     LOCAL_APPDATA, MICROSOFT, PROGRAM_FILES, SYSTEM_ROOT, Component, InstalledState, InstallContext,
     _add_appx_package, _generic_registry_uninstall, _run_uninstall_command, _safe_extract,
@@ -54,6 +54,9 @@ def _github_latest(repo: str, pattern: "re.Pattern[str]", tag_to_version: Callab
     SHA-256, and a version derived from the tag. Falls back to `fallback` (a
     pinned release) when the API can't be read, or raises if there isn't one."""
     log = get_logger()
+    published_info = published.lookup(repo, pattern)
+    if published_info is not None:
+        return published_info
     try:
         resp = http_cache.get(f"https://api.github.com/repos/{repo}/releases/latest", headers=github_headers(), timeout=15)
         resp.raise_for_status()
@@ -66,7 +69,7 @@ def _github_latest(repo: str, pattern: "re.Pattern[str]", tag_to_version: Callab
                 )
         raise LookupError(f"{repo}'s latest release has no asset matching {pattern.pattern}")
     except Exception as e:  # noqa: BLE001 - any failure -> pinned fallback or a clear error
-        if fallback is not None:
+        if fallback is not None and not published.is_strict():
             log.status(f"Could not query GitHub for {repo} ({e}); using pinned fallback")
             return fallback
         raise

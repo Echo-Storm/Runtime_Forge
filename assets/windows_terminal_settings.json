@@ -4,30 +4,25 @@
     "actions": [],
     "defaultProfile": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
     "keybindings": [],
-    "newTabMenu": 
-    [
+    "newTabMenu": [
         {
             "type": "remainingProfiles"
         }
     ],
-    "profiles": 
-    {
-        "defaults": 
-        {
+    "profiles": {
+        "defaults": {
             "startingDirectory": null,
             "bellStyle": "none",
             "scrollbarState": "visible",
             "historySize": 30000,
-            "font": 
-            {
+            "font": {
                 "face": "Cascadia Code",
                 "size": 11
             },
             "opacity": 85,
             "useAcrylic": true
         },
-        "list": 
-        [
+        "list": [
             {
                 "colorScheme": "CMD Green",
                 "commandline": "%SystemRoot%\\System32\\cmd.exe",
@@ -80,40 +75,40 @@
             },
             {
                 "colorScheme": "Python Burgundy",
-                "commandline": "C:\\Program Files\\Python314\\python.exe",
+                "commandline": "py.exe -3.14",
                 "guid": "{7c1e5d2a-93b4-4f60-8a17-2d9e4b6f0a14}",
-                "icon": "C:\\Program Files\\Python314\\python.exe",
+                "icon": "C:\\Windows\\py.exe",
                 "name": "\ud83d\udfe5 Python 3.14"
             },
             {
                 "colorScheme": "Python Burgundy",
-                "commandline": "C:\\Program Files\\Python313\\python.exe",
+                "commandline": "py.exe -3.13",
                 "guid": "{5d8aadd8-c4a2-4f99-a493-ecaec8042092}",
-                "icon": "C:\\Program Files\\Python313\\python.exe",
+                "icon": "C:\\Windows\\py.exe",
                 "name": "\ud83d\udfe5 Python 3.13"
             },
             {
                 "colorScheme": "Python Burgundy",
-                "commandline": "C:\\Program Files\\Python312\\python.exe",
+                "commandline": "py.exe -3.12",
                 "guid": "{f1a2b3c4-d5e6-47a8-9123-abcdef123003}",
                 "hidden": true,
-                "icon": "C:\\Program Files\\Python312\\python.exe",
+                "icon": "C:\\Windows\\py.exe",
                 "name": "\ud83d\udfe5 Python 3.12"
             },
             {
                 "colorScheme": "Python Burgundy",
-                "commandline": "C:\\Program Files\\Python311\\python.exe",
+                "commandline": "py.exe -3.11",
                 "guid": "{993bbbcd-36f1-42fd-bda7-c22eba42e0b8}",
                 "hidden": false,
-                "icon": "C:\\Program Files\\Python311\\python.exe",
+                "icon": "C:\\Windows\\py.exe",
                 "name": "\ud83d\udfe5 Python 3.11"
             },
             {
                 "colorScheme": "Python Burgundy",
-                "commandline": "C:\\Program Files\\Python310\\python.exe",
+                "commandline": "py.exe -3.10",
                 "guid": "{7260a0c0-2da0-43c3-b171-9936aa4a179c}",
                 "hidden": true,
-                "icon": "C:\\Program Files\\Python310\\python.exe",
+                "icon": "C:\\Windows\\py.exe",
                 "name": "\ud83d\udfe5 Python 3.10"
             },
             {
@@ -177,8 +172,7 @@
             }
         ]
     },
-    "schemes": 
-    [
+    "schemes": [
         {
             "background": "#2B1A00",
             "black": "#1A0F00",

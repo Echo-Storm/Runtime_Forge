@@ -10,6 +10,18 @@
   including their `%APPDATA%\Python\PythonXY` user-site folders. Nothing is uninstalled.
 - Python installs are detected through the registry (PEP 514), so a Python in a custom
   folder (`E:\Python314`) now shows as installed instead of "not installed".
+- **Published version catalog** (`data/versions.json`, refreshed daily by a GitHub Action):
+  one request replaces ~20 GitHub API calls per scan, so the 60-an-hour limit stops
+  degrading scans. Entries are validated (github.com URL, 64-hex SHA-256, matching file
+  name, not older than 10 days) and downloads are verified exactly as before. A
+  `GITHUB_TOKEN` or `RUNTIME_FORGE_NO_CATALOG=1` uses the live API instead.
+- **LLVM was silently stuck on a pinned version**: LLVM 23.x releases only ship
+  `.tar.xz` archives, not the Windows installer, so "latest release" had no installer.
+  It now takes the newest stable release that does (22.1.8 today).
+- **Windows Terminal profile is merged, not replaced**: your own profiles, schemes,
+  keybindings and defaults are kept; ours are added or refreshed by GUID/name; "installed"
+  means ours are present and current (adding your own profiles no longer flips it to
+  "not installed"). The Python entries launch via `py -3.x`, so custom install folders work.
 - Housekeeping: an unused import, a docstring warning in `tools/screenshot.py`.
 
 ## 0.4.1

@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "generated": "2026-10-15",
+  "entries": {
+    "Kitware/CMake": {
+      "version": "4.4.4",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-windows-x86_64.msi",
+      "filename": "cmake-4.4.4-windows-x86_64.msi",
+      "sha256": "f7aac962e8eea82c0a1c603bb11ee3514806a43a35147d5b1e9d69926ffd7d7e"
+    },
+    "NationalSecurityAgency/ghidra": {
+      "version": "12.1.4",
+      "url": "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip",
+      "filename": "ghidra_12.1.4_PUBLIC_20260921.zip",
+      "sha256": "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db"
+    },
+    "PowerShell/PowerShell": {
+      "version": "7.6.7",
+      "url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi",
+      "filename": "PowerShell-7.6.7-win-x64.msi",
+      "sha256": "ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0"
+    },
+    "adoptium/temurin17-binaries": {
+      "version": "17.0.20.1+1",
+      "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_windows_hotspot_17.0.20.1_1.msi",
+      "filename": "OpenJDK17U-jdk_x64_windows_hotspot_17.0.20.1_1.msi",
+      "sha256": "a6013774c5e4a34951e11c1997d8b4641d2de7736d3eac839231f4266bd1116f"
+    },
+    "adoptium/temurin21-binaries": {
+      "version": "21.0.12.1+1",
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.msi",
+      "filename": "OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.msi",
+      "sha256": "454cfd334b9ca91c96dd8c2de97fcef6b9f1f98be9172ff076711f1c6b44e4e0"
+    },
+    "adoptium/temurin8-binaries": {
+      "version": "8.0.504+1",
+      "url": "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u504-b01/OpenJDK8U-jdk_x64_windows_hotspot_8u504b01.msi",
+      "filename": "OpenJDK8U-jdk_x64_windows_hotspot_8u504b01.msi",
+      "sha256": "5115720df210f3c98b592ea2cb9981f48ba6b6942a7c40ba7fe4a59c37d5b815"
+    },
+    "astral-sh/uv": {
+      "version": "0.13.1",
+      "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-pc-windows-msvc.zip",
+      "filename": "uv-x86_64-pc-windows-msvc.zip",
+      "sha256": "3b2661a463a5baea7f5076ea2b25ab71d77f36a6c0d809e5350651792f80a672"
+    },
+    "cli/cli": {
+      "version": "2.102.0",
+      "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_windows_amd64.msi",
+      "filename": "gh_2.102.0_windows_amd64.msi",
+      "sha256": "7944b579d76359e5b859a263bf63583e271ae3fbd427ae46e133c1f348b46371"
+    },
+    "git-for-windows/git": {
+      "version": "2.56.0.windows.2",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/Git-2.56.0.2-64-bit.exe",
+      "filename": "Git-2.56.0.2-64-bit.exe",
+      "sha256": "52188f917b378f00c70ec136bcf090005f30d44fbc4eba0bce759cc6592d60f6"
+    },
+    "jqlang/jq": {
+      "version": "1.8.2",
+      "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",
+      "filename": "jq.exe",
+      "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+    },
+    "kcat/openal-soft": {
+      "version": "1.25.2",
+      "url": "https://github.com/kcat/openal-soft/releases/download/1.25.2/openal-soft-1.25.2-bin.zip",
+      "filename": "openal-soft-1.25.2-bin.zip",
+      "sha256": "67a0c4b800bd860c93c04f38caf8cbe4875f9c84700ac430efc451f70e265434"
+    },
+    "llvm/llvm-project": {
+      "version": "22.1.8",
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.exe",
+      "filename": "LLVM-22.1.8-win64.exe",
+      "sha256": "16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c"
+    },
+    "microsoft/terminal": {
+      "version": "1.25.2733.0",
+      "url": "https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_8wekyb3d8bbwe.msixbundle",
+      "filename": "Microsoft.WindowsTerminal_1.25.2733.0_8wekyb3d8bbwe.msixbundle",
+      "sha256": "cce6e9cc3c8457fa11ced1d2a7354888c7d6db83c5ace5d5891a52c95e3b21da"
+    },
+    "microsoft/winget-cli": {
+      "version": "1.29.380",
+      "url": "https://github.com/microsoft/winget-cli/releases/download/v1.29.380/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle",
+      "filename": "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle",
+      "sha256": "65dea9c01ce08ee7b763366b27c0e651f97db857c11ca9b9c301826c10092f2e"
+    },
+    "ninja-build/ninja": {
+      "version": "1.13.2",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip",
+      "filename": "ninja-win.zip",
+      "sha256": "07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65"
+    }
+  }
+}

@@ -7,6 +7,7 @@ Each script runs in its own process with:
   - QT_QPA_PLATFORM=offscreen  (no windows flash on screen)
   - RUNTIME_FORGE_DATA_DIR=<temp dir>  (logs/profiles/PATH backups of the
     test run stay out of the project folder and your real data)
+  - RUNTIME_FORGE_NO_CATALOG=1  (the published version catalog is skipped)
 
     venv\\Scripts\\python.exe tools\\run_tests.py            # everything
     venv\\Scripts\\python.exe tools\\run_tests.py ui speed   # only files whose name contains one of these
@@ -38,7 +39,8 @@ def main() -> int:
         return 1
 
     data_dir = Path(tempfile.mkdtemp(prefix="rf_tests_"))
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", RUNTIME_FORGE_DATA_DIR=str(data_dir), PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", RUNTIME_FORGE_DATA_DIR=str(data_dir), PYTHONIOENCODING="utf-8",
+               RUNTIME_FORGE_NO_CATALOG="1")  # tests use mocks or the live path, never the published catalog
 
     failed = []
     started = time.time()

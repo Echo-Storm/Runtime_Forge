@@ -33,7 +33,7 @@ DEFAULT_TTL = 15 * 60        # successful responses, in memory
 FAILURE_TTL = 60             # HTTP errors (e.g. a 403 rate limit): don't hammer
 ERROR_TTL = 30               # connection errors
 MAX_DISK_BODY = 2 * 1024 * 1024
-_DISK_HOSTS = ("https://api.github.com/", "https://go.dev/", "https://static.rust-lang.org/",
+_DISK_HOSTS = ("https://api.github.com/", "https://raw.githubusercontent.com/", "https://go.dev/", "https://static.rust-lang.org/",
                "https://update.code.visualstudio.com/", "https://builds.dotnet.microsoft.com/",
                "https://nodejs.org/", "https://vulkan.lunarg.com/")
 

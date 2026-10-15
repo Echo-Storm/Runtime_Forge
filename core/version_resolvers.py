@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from core import http_cache
+from core import http_cache, published
 from core.logger import get_logger
 
 REQUEST_TIMEOUT = 15
@@ -83,6 +83,9 @@ def get_latest_github_asset(
     fallback_sha256: Optional[str] = None,
 ) -> LatestInfo:
     log = get_logger()
+    published_info = published.lookup(repo, asset_pattern)
+    if published_info is not None:
+        return published_info
     try:
         resp = http_cache.get(
             f"https://api.github.com/repos/{repo}/releases/latest",
@@ -102,6 +105,8 @@ def get_latest_github_asset(
     except Exception as e:
         log.status(f"Could not query GitHub for {repo} latest release ({e}); using pinned fallback")
 
+    if published.is_strict():
+        raise LookupError(f"live lookup of {repo} failed (strict mode: no pinned fallback)")
     return LatestInfo(version=fallback_version, url=fallback_url, filename=fallback_url.rsplit("/", 1)[-1],
                       sha256=fallback_sha256)
 
@@ -148,6 +153,9 @@ def get_latest_temurin(feature_version: int, fallback_version: str) -> LatestInf
     limit, offline)."""
     log = get_logger()
     pattern = re.compile(rf"^OpenJDK{feature_version}U-jdk_x64_windows_hotspot_.*\.msi$")
+    published_info = published.lookup(f"adoptium/temurin{feature_version}-binaries", pattern)
+    if published_info is not None:
+        return published_info
     try:
         resp = http_cache.get(
             f"https://api.github.com/repos/adoptium/temurin{feature_version}-binaries/releases/latest",
@@ -163,6 +171,8 @@ def get_latest_temurin(feature_version: int, fallback_version: str) -> LatestInf
         log.status(f"temurin{feature_version}-binaries latest release had no matching MSI; trying the Adoptium API")
     except Exception as e:
         log.status(f"Could not query GitHub for Temurin {feature_version} ({e}); trying the Adoptium API")
+    if published.is_strict():
+        raise LookupError(f"live lookup of Temurin {feature_version} failed (strict mode)")
     return get_latest_adoptium(feature_version, fallback_version)
 
 

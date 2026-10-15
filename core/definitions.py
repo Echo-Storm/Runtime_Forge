@@ -11,7 +11,7 @@ downloaded .exe with its documented silent flags) or a native OS tool
 (dism.exe for the NetFx3 feature).
 """
 
-import hashlib
+import json
 import os
 import re
 import shutil
@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from core import checks, http_cache, path_backup, python_default
+from core import checks, http_cache, path_backup, published, python_default, terminal_profile
 from core.downloader import Trust, download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
@@ -1367,32 +1367,39 @@ _LLVM_EXE = PROGRAM_FILES / "LLVM" / "bin" / "clang.exe"
 
 
 def _llvm_resolve_latest() -> LatestInfo:
-    # Not using get_latest_github_asset() — LLVM's release tags are
-    # "llvmorg-22.1.8", not the "v22.1.8" convention every other
-    # GitHub-releases-based component here uses, so the shared helper's
-    # tag_name.lstrip("v") would leave the "llvmorg-" prefix in place
-    # (lstrip only strips from the very start, and "llvmorg-..." doesn't
-    # start with "v"). Small dedicated resolver instead of adding a
-    # prefix parameter to a function 6+ other components already rely on.
+    # Not using get_latest_github_asset(): LLVM's tags are "llvmorg-22.1.8", not
+    # "v22.1.8", and - more importantly - the LATEST release isn't necessarily one
+    # that ships the Windows installer. The 23.x releases only publish
+    # clang+llvm-*.tar.xz archives, while 22.1.x still has LLVM-<ver>-win64.exe, so a
+    # plain "latest release" lookup finds no installer (and, before this, silently
+    # fell back to a pinned version forever). Walk the recent releases and take the
+    # newest stable one that does carry the installer.
     log = get_logger()
+    published_info = published.lookup("llvm/llvm-project", _LLVM_PATTERN)
+    if published_info is not None:
+        return published_info
     try:
         resp = http_cache.get(
-            "https://api.github.com/repos/llvm/llvm-project/releases/latest",
+            "https://api.github.com/repos/llvm/llvm-project/releases?per_page=30",
             headers=github_headers(), timeout=15,
         )
         resp.raise_for_status()
-        rel = resp.json()
-        for asset in rel.get("assets", []):
-            if _LLVM_PATTERN.search(asset["name"]):
-                return LatestInfo(
-                    version=rel["tag_name"].removeprefix("llvmorg-"),
-                    url=asset["browser_download_url"],
-                    filename=asset["name"],
-                    sha256=asset_sha256(asset),
-                )
-        log.status("llvm/llvm-project latest release had no matching asset; using pinned fallback")
+        for rel in resp.json():
+            if rel.get("prerelease") or rel.get("draft"):
+                continue
+            for asset in rel.get("assets", []):
+                if _LLVM_PATTERN.search(asset["name"]):
+                    return LatestInfo(
+                        version=rel["tag_name"].removeprefix("llvmorg-"),
+                        url=asset["browser_download_url"],
+                        filename=asset["name"],
+                        sha256=asset_sha256(asset),
+                    )
+        log.status("none of llvm/llvm-project's recent releases has a Windows installer; using pinned fallback")
     except Exception as e:
-        log.status(f"Could not query GitHub for llvm/llvm-project latest release ({e}); using pinned fallback")
+        log.status(f"Could not query GitHub for llvm/llvm-project releases ({e}); using pinned fallback")
+    if published.is_strict():
+        raise LookupError("live lookup of llvm/llvm-project failed (strict mode: no pinned fallback)")
     return LatestInfo(version=_LLVM_FALLBACK_VERSION, url=_LLVM_FALLBACK_URL, filename=_LLVM_FALLBACK_URL.rsplit("/", 1)[-1],
                       sha256=_LLVM_FALLBACK_SHA256)
 
@@ -1596,6 +1603,9 @@ def _jq_resolve_latest() -> LatestInfo:
     # Not using get_latest_github_asset() — jq's release tags are "jq-1.8.2",
     # not the "v1.8.2" convention (same situation as LLVM, different prefix).
     log = get_logger()
+    published_info = published.lookup("jqlang/jq")
+    if published_info is not None and published_info.url.endswith("/jq-windows-amd64.exe"):
+        return LatestInfo(published_info.version, published_info.url, "jq.exe", published_info.sha256)
     try:
         resp = http_cache.get(
             "https://api.github.com/repos/jqlang/jq/releases/latest",
@@ -1614,6 +1624,8 @@ def _jq_resolve_latest() -> LatestInfo:
         log.status("jqlang/jq latest release had no matching asset; using pinned fallback")
     except Exception as e:
         log.status(f"Could not query GitHub for jqlang/jq latest release ({e}); using pinned fallback")
+    if published.is_strict():
+        raise LookupError("live lookup of jqlang/jq failed (strict mode: no pinned fallback)")
     return LatestInfo(version=_JQ_FALLBACK_VERSION, url=_JQ_FALLBACK_URL, filename="jq.exe", sha256=_JQ_FALLBACK_SHA256)
 
 
@@ -1677,39 +1689,38 @@ def _terminal_profile_source() -> Path:
     return get_bundle_dir() / "assets" / "windows_terminal_settings.json"
 
 
-def _file_sha256(path: Path) -> Optional[str]:
-    if not path.is_file():
-        return None
+def _bundled_terminal_settings() -> Optional[dict]:
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
+        return terminal_profile.parse_settings(_terminal_profile_source().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
 
 
 def _terminal_profile_is_installed() -> InstalledState:
-    # No numeric "version" for a config file — either the live settings.json
-    # is byte-identical to what this app would install (a real, meaningful
-    # "installed" signal, confirmed via SHA256 rather than assuming
-    # presence-of-any-settings.json means "ours"), or it isn't, in which
-    # case Install Selected will write it fresh. No resolve_latest either:
-    # this app's own bundled copy IS "latest" by definition, same as
-    # Python/7-Zip/WinRAR's pinned-target pattern, just without a version
-    # number worth displaying.
-    source_hash = _file_sha256(_terminal_profile_source())
-    if source_hash is None:
+    # "Applied" = every bundled profile and colour scheme is in the live
+    # settings.json and current. Anything else in the file (the user's own
+    # profiles, keybindings, theme...) is irrelevant to the answer - this used
+    # to compare whole-file hashes, so a single added profile made it "not
+    # installed" for good.
+    bundled = _bundled_terminal_settings()
+    if bundled is None or not _TERMINAL_PROFILE_TARGET.is_file():
         return InstalledState(installed=False)
-    return InstalledState(installed=_file_sha256(_TERMINAL_PROFILE_TARGET) == source_hash)
+    try:
+        live = terminal_profile.parse_settings(_TERMINAL_PROFILE_TARGET.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return InstalledState(installed=False)
+    return InstalledState(installed=terminal_profile.is_applied(live, bundled))
 
 
 def _terminal_profile_install(ctx: InstallContext) -> bool:
     log = get_logger()
-    source = _terminal_profile_source()
-    if not source.is_file():
-        log.fail("Bundled Windows Terminal settings file is missing from this install")
+    bundled = _bundled_terminal_settings()
+    if bundled is None:
+        log.fail("Bundled Windows Terminal settings file is missing or unreadable in this install")
         return False
 
     if ctx.dry_run:
-        log.dry(f"Would back up {_TERMINAL_PROFILE_TARGET} (if present) and replace it with the bundled profile")
+        log.dry(f"Would merge the bundled profiles into {_TERMINAL_PROFILE_TARGET} (backing it up first)")
         return True
 
     target_dir = _TERMINAL_PROFILE_TARGET.parent
@@ -1725,11 +1736,19 @@ def _terminal_profile_install(ctx: InstallContext) -> bool:
         log.fail(f"Could not create Windows Terminal's settings folder ({target_dir}): {e}")
         return False
 
-    if _TERMINAL_PROFILE_TARGET.is_file():
-        # Never overwrite a personal settings file without a way back —
-        # same backup-before-mutating-state discipline as PATH backups,
-        # scaled down to a single file since there's nothing else sharing
-        # this target to coordinate with.
+    if not _TERMINAL_PROFILE_TARGET.is_file():
+        merged = terminal_profile.merge({}, bundled)
+    else:
+        try:
+            live = terminal_profile.parse_settings(_TERMINAL_PROFILE_TARGET.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            log.fail(
+                f"Could not read your settings.json ({e}) - leaving it untouched. Fix or remove the "
+                f"file and try again."
+            )
+            return False
+        merged = terminal_profile.merge(live, bundled)
+        # Never change a personal config file without a way back.
         backup_path = target_dir / f"settings.json.bak_{datetime.now():%Y%m%d_%H%M%S}"
         try:
             shutil.copyfile(_TERMINAL_PROFILE_TARGET, backup_path)
@@ -1739,10 +1758,11 @@ def _terminal_profile_install(ctx: InstallContext) -> bool:
             return False
 
     try:
-        shutil.copyfile(source, _TERMINAL_PROFILE_TARGET)
+        _TERMINAL_PROFILE_TARGET.write_text(json.dumps(merged, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as e:
         log.fail(f"Could not write settings.json: {e}")
         return False
+    log.status("Merged the bundled profiles and colour schemes (your own profiles and settings were kept)")
     return True
 
 

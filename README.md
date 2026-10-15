@@ -78,7 +78,10 @@ What it does
   Deliberately not opinionated about the rest of dev tooling (Git/Node/
   CMake/VS Code/PowerShell). Only seeds if you have zero profiles at all —
   never overwrites or fights with anything you've built or renamed.
-- **Rate-limit proof lookups** — version lookups are cached on disk with their ETags: a
+- **Rate-limit proof lookups** — the GitHub-hosted components' latest versions, URLs and SHA-256s
+  come from one small file in this repo (`data/versions.json`, refreshed daily by a GitHub
+  Action), so a scan no longer spends ~20 of GitHub's 60 unauthenticated API calls an hour.
+  Everything else is cached on disk with its ETag: a
   repeat request is conditional (GitHub doesn't count a 304), and if GitHub rate-limits
   or is unreachable the last good answer is used instead of guessing from pinned versions.
 - **Fast scans** — every component's presence check and latest-version lookup
@@ -185,6 +188,7 @@ Everything lives in `tools/`; run any of them with
 | `verify_downloads.py [--only k,k] [--skip k,k]` | Downloads every component through the real hash/signature checks without installing anything. Run it after touching a URL, hash or publisher. ~1.5 GB for everything. |
 | `screenshot.py out.png [--theme dark\|light] [--expand "A,B"] [--select KEY] [--no-banner] [--width N --height N]` | Renders the real window after a real scan to a PNG (how the README screenshots are made); settings go to a throw-away folder. |
 | `inspect_dll_version.py <path> [field ...]` | Prints a DLL/EXE's PE VERSIONINFO fields — what caught the OpenAL false-positive (an NVIDIA-bundled `OpenAL32.dll` passing a filename-only check). Reach for it when two binaries share a filename but not an identity. |
+| `update_versions.py [--dry-run]` | Resolves every GitHub-hosted component live (strict: no pinned fallbacks) and writes `data/versions.json`. Run daily by `.github/workflows/update-versions.yml`; needs a `GITHUB_TOKEN`. |
 | `gen_icon.py`, `gen_banner.py`, `gen_check.py` | Regenerate `assets/icon.*`, `assets/banner.png`, and the tick / dash / chevron images the stylesheet uses. Need Pillow (`requirements-dev.txt`). |
 
 **Tests** (`tests/`) are one script per fix or feature, each driving a real
@@ -201,6 +205,7 @@ runs them all.
 | `GITHUB_TOKEN` / `GH_TOKEN` | Lifts GitHub's 60-requests-an-hour limit for version lookups. Only ever sent to `api.github.com`. |
 | `RUNTIME_FORGE_DATA_DIR` | Redirects logs, `RuntimeForge.ini`, profiles and PATH backups (tests use it so they never touch real data). |
 | `RF_NO_ADMIN=1` | At *build* time: the exe won't demand elevation. |
+| `RUNTIME_FORGE_NO_CATALOG=1` | Skip the published version catalog and use the live GitHub API (a `GITHUB_TOKEN` does the same). |
 | `RF_FORCE_UPDATE_CHECK=1` | Makes a source checkout do the "newer release?" check the packaged app does. |
 
 What It Installs / Enables
@@ -290,20 +295,19 @@ PhysX) — are never pre-checked by the first scan or by *Select needed*; you
 tick them deliberately. (An update to one that's already installed *is*
 selected.)
 
-**Extras** — a curated, color-coded Windows Terminal profile: one entry per
-Python version (3.10 – 3.14), a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
-by default, only useful if you have MSYS2), VS 2022 dev consoles, plus
-elevated variants of the shells. Bundled with this app
-(`assets/windows_terminal_settings.json`) rather than read from its
-personal OneDrive backup location, so it's fully self-contained and works
-on a fresh machine that hasn't synced that folder yet. Detected via SHA256
-comparison against the live `settings.json` — not just "does a settings
-file exist," but "does it match exactly what this app would install."
-It refuses to run unless Windows Terminal is installed (so it never creates
-an orphan settings folder), and never overwrites an existing settings.json
-without backing it up first
-(`settings.json.bak_<timestamp>`, right next to the real file) — this is
-a personal config file, not something to silently discard.
+**Extras** — a curated, color-coded Windows Terminal profile set: one entry per
+Python version (3.10 – 3.14, launched through the `py` launcher so any install folder
+works), a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden by default, only
+useful if you have MSYS2), VS 2022 dev consoles, plus elevated variants of the shells.
+It's **merged into** your `settings.json`, not a replacement for it: your own profiles,
+colour schemes, keybindings, theme and `profiles.defaults` values stay exactly as they
+are; the bundled profiles (matched by GUID) and schemes (by name) are added or
+refreshed, keeping your own show/hide choice for them; missing defaults are filled in.
+It counts as installed when every bundled profile and scheme is present and current, so
+adding your own profiles never makes it "not installed". It refuses to run unless Windows
+Terminal is installed, leaves an unreadable `settings.json` alone, and always writes a
+timestamped `settings.json.bak_<time>` next to the real file first (Terminal's settings
+allow comments; the merged file doesn't keep them, the backup does).
 
 Behavior Notes
 --------------

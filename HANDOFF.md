@@ -28,6 +28,10 @@ core/
   signature.py          WinVerifyTrust via ctypes, signer CN/O extraction, publisher allowlist
   installer_runner.py   run_exe / run_msi (re-verify, exit-code handling, timeout)
   version_resolvers.py  GitHub / Adoptium / Node lookups, LatestInfo(version,url,filename,sha256)
+  published.py          the published catalog (data/versions.json): first stop for GitHub-hosted
+                        components' latest version/url/sha256; validated; skipped with a token
+  terminal_profile.py   JSONC parser + merge/is_applied for the Windows Terminal profile
+  python_default.py     PEP 514 discovery + the 'make the newest Python the default' PATH plan
   http_cache.py         lookups cache: in-memory single-flight + on-disk ETag copies that survive
                         GitHub's rate limit (`http_cache.json` in the data folder)
   checks.py             registry/PE/command probes; one-read registry snapshot; appx_package_version()
@@ -147,16 +151,17 @@ because machine entries are resolved before user entries (a per-user newest Pyth
 ## What's next (suggested order)
 
 1. Whatever the test pass above turns up.
-2. **A pinned `versions.json` fetched from the repo** (raw.githubusercontent.com, a CDN — not
-   rate limited like `api.github.com`), refreshed by a scheduled GitHub Action that resolves each
-   component's latest version + SHA-256 and opens a reviewable PR. One request replaces ~20 API calls
-   and gives every download a reviewed hash. (Both runs' logs show the 60/hour limit biting on first launch.)
+2. ~~A pinned `versions.json` fetched from the repo~~ — **done** (`core/published.py`, `tools/update_versions.py`,
+   `.github/workflows/update-versions.yml`). Check that the workflow actually ran after the first push
+   (Actions tab → *Update versions.json* → Run workflow) and that `data/versions.json` updates daily.
+   It commits straight to `main`; switch to a PR if you want to review each refresh. Pushing the workflow file
+   needs the `workflow` scope on your gh token (`gh auth refresh -s workflow`).
 3. **Declarative component specs** — `definitions.py` is ~1,800 lines and ~15 components repeat
    resolve → download → verify → run. A small spec type (like the winget factory in
    `catalog.py`) would make a new tool a few lines, and could load from a JSON catalog.
 4. **CI**: GitHub Actions on `windows-latest` running `tools/run_tests.py`, and building the
    installer + attaching it to a release on tag (needs Inno Setup via choco).
-5. **Windows Terminal profile merge** instead of replace (merge profiles by GUID; keep the user's own).
+5. ~~Windows Terminal profile merge~~ — **done** (`core/terminal_profile.py`).
 6. **Code signing** for the exe/installer (SmartScreen warns today).
 7. **On-demand elevation**: launch un-elevated and only elevate when something needs it
    (the manifest currently forces admin; a prototype idea is a `requires_admin` flag per component).
