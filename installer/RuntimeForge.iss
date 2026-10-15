@@ -9,7 +9,7 @@
 ; Build with (after `pyinstaller RuntimeForge.spec --clean` from the
 ; repo root has produced dist\RuntimeForge\):
 ;   "C:\Users\<you>\AppData\Local\Programs\Inno Setup 7\ISCC.exe" installer\RuntimeForge.iss
-; Output lands in dist_installer\RuntimeForge-Setup-0.1.0.exe (gitignored -
+; Output lands in dist_installer\RuntimeForge-Setup-0.2.0.exe (gitignored -
 ; this script is what's tracked, not the built installer binary).
 ;
 ; PrivilegesRequired=admin matches the app's own behavior: RuntimeForge.exe
@@ -28,7 +28,7 @@
 ; branding. If you tested the old-named build, uninstall it separately
 ; first (Start Menu or Settings > Apps) - it won't be touched by this one.
 
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 
 [Setup]
 AppId={{7444CA67-BD70-4A65-BDD0-9F0EB7A3AB80}

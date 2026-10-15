@@ -302,7 +302,7 @@ def _is_admin() -> bool:
 
 class MainWindow(QMainWindow):
     APP_NAME = "Runtime Forge"
-    APP_VERSION = "0.1.0"
+    APP_VERSION = "0.2.0"
 
     def __init__(self):
         super().__init__()
