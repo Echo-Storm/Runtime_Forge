@@ -21,9 +21,6 @@ Git, Node, CMake, LLVM, VS Code...). Every download is checked against its
 publisher's signature and/or a SHA-256 before it runs, and nothing is
 installed until you've confirmed.
 
-It started as a PowerShell script and grew a real interface; the PowerShell
-version is long gone and nothing here depends on it.
-
 Author: XechostormX
 
 Screenshot
