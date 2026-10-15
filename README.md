@@ -31,12 +31,13 @@ What it does
 ------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
-  release exists, what's available) instead of a plain yes/no. All 48
-  components report their real installed version, not just presence; 32 of
+  release exists, what's available) instead of a plain yes/no. All 62
+  components report their real installed version, not just presence; 37 of
   them can also be checked for updates against a real source (a live API, or
-  this app's own pinned install target). The other 16 — DirectX, .NET
-  Framework 3.5, WebView2, the VC++ redistributables and the Windows Terminal
-  profile — have no meaningful "latest version" to compare against at all
+  this app's own pinned install target). The other 25 — DirectX, .NET
+  Framework 3.5, WebView2, DirectPlay, XNA, the VC++ redistributables, the
+  self-updating apps and the Windows Terminal profile — have no meaningful
+  "latest version" to compare against at all
   (DirectX's June 2010 redistributable is genuinely the final one Microsoft
   ever shipped, WebView2 self-updates in the background regardless of this
   app, the VC++ installers are evergreen URLs rather than versioned
@@ -191,7 +192,7 @@ runs them all.
 
 What It Installs / Enables
 -----------------------------------------------
-Everything the tree offers, by category (48 components in all):
+Everything the tree offers, by category (62 components in all):
 
 **Core Runtimes** — winget, .NET Framework 3.5, DirectX June 2010 (full
 legacy DirectX 9.0c via DXSETUP), OpenAL (plants the Legacy compatibility
@@ -217,7 +218,8 @@ Adoptium API), with the release's SHA-256 verified before running it.
 **Python** — 3.10, 3.11, 3.12, 3.13, 3.14 (pinned patch versions, all-users
 install with PATH and the launcher). python.org only publishes Windows
 installers for a series until it goes security-only, so 3.10–3.12 are pinned
-to their last installer release.
+to their last installer release. Also here: **uv**, the fast Python package
+manager (portable — placed in `Program Files\uv` and added to PATH).
 
 **Dev Tools** — PowerShell 7, Git for Windows, Node.js (LTS), CMake, Visual
 Studio Code, GitHub CLI, LLVM/Clang, ninja, and jq — each resolved to its
@@ -225,12 +227,15 @@ latest release/LTS at scan time via GitHub/nodejs.org/Microsoft APIs, with
 a pinned fallback if the API can't be reached. ninja and jq ship as a raw
 binary/zip with no installer at all — this app places the binary itself
 and adds its folder to PATH directly (`core/path_backup.add_directory_to_path`),
-the only two components that need to.
+the only two components that need to (uv, below, does the same).
 
-**Archive Tools** — 7-Zip and WinRAR. A deliberately narrow exception to
-this app's dev/runtime-tool scope, not a step toward a general app
-installer — both are close to universally needed regardless of what the
-machine is otherwise for. Neither publishes a live "latest version" API
+Also under Dev Tools: **Windows Terminal** (the verified `.msixbundle` from
+its GitHub release — the bundled terminal profile below needs it), **MSYS2**,
+**Inno Setup** and **Ghidra** (portable; extracted to `Program Files\Ghidra`,
+and it wants a JDK 21, which is right above).
+
+**Archive Tools** — 7-Zip and WinRAR, close to universally needed
+regardless of what the machine is otherwise for. Neither publishes a live "latest version" API
 (confirmed unreliable for both during research — a scraped download page
 that doesn't reflect the real current release is worse than no check at
 all), so both are hand-pinned like Python rather than tracked live. WinRAR
@@ -239,6 +244,25 @@ expires) — installing it here doesn't change that. Also: if you were ever
 going to actually pay for one piece of software in your life, on the honor
 system, after decades of never enforcing its own trial — make it this one.
 Ask them on Twitter for a big discount first, though.
+
+**Legacy Game Support** — **DirectPlay** (the old networking layer, switched
+on as a Windows optional feature with `dism.exe`), **Microsoft XNA Framework
+4.0** (a verified MSI; a lot of indie games from that era need it) and
+**NVIDIA PhysX System Software** (installed through winget).
+
+**Go & Rust** — **Go** (the MSI, checked against the SHA-256 on go.dev's
+download page and Google's signature) and **Rust** (`rustup-init`, checked
+against the SHA-256 the Rust project publishes, then `rustup` fetches the
+stable toolchain for the current user). Rust links with the Microsoft C++
+build tools, so Visual Studio Build Tools has to be there too.
+
+**Apps** — a small, entirely optional set: **Google Chrome** (the enterprise
+MSI, signature-checked), and **Discord**, **AnyDesk** and the **Claude**
+desktop app, installed through winget. Apps — and the other things marked
+*optional* in the Details tab (Go, Rust, uv, Ghidra, MSYS2, Inno Setup,
+PhysX) — are never pre-checked by the first scan or by *Select needed*; you
+tick them deliberately. (An update to one that's already installed *is*
+selected.)
 
 **Extras** — a curated, color-coded Windows Terminal profile: one entry per
 Python version (3.10 – 3.14), a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
@@ -249,7 +273,9 @@ personal OneDrive backup location, so it's fully self-contained and works
 on a fresh machine that hasn't synced that folder yet. Detected via SHA256
 comparison against the live `settings.json` — not just "does a settings
 file exist," but "does it match exactly what this app would install."
-Never overwrites an existing settings.json without backing it up first
+It refuses to run unless Windows Terminal is installed (so it never creates
+an orphan settings folder), and never overwrites an existing settings.json
+without backing it up first
 (`settings.json.bak_<timestamp>`, right next to the real file) — this is
 a personal config file, not something to silently discard.
 
@@ -285,6 +311,11 @@ is executed (so a file swapped on disk in between is caught):
   publishes, VS Code against its update API's hash, and the installers that
   ship unsigned (7-Zip, LLVM, jq, ninja, OpenAL Soft) against hashes pinned in
   source. A mismatch is never retried; the file is discarded.
+
+Components installed *through winget* (Discord, AnyDesk, Claude, MSYS2, Inno
+Setup, PhysX) are verified by winget itself against the SHA-256 in each
+package's reviewed manifest; they need the winget component installed first,
+and the app says so plainly if it isn't.
 
 `tools\verify_downloads.py` downloads every component through this same
 path without installing anything and reports which ones verify - run it

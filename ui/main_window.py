@@ -483,7 +483,10 @@ class MainWindow(QMainWindow):
         row.addWidget(self.progress_bar)
 
         self.select_missing_btn = QPushButton("Select needed")
-        self.select_missing_btn.setToolTip("Check everything that isn't installed, plus anything with an update available")
+        self.select_missing_btn.setToolTip(
+            "Check everything missing or outdated. Optional extras (apps, Go, Rust, Ghidra...) are only "
+            "checked when they're already installed and have an update."
+        )
         self.select_missing_btn.clicked.connect(self._on_select_not_installed)
         row.addWidget(self.select_missing_btn)
 
@@ -856,7 +859,11 @@ class MainWindow(QMainWindow):
         # update available — the whole point of surfacing "update available"
         # is for Install to actually be able to act on it. Only on the very
         # first scan, though — see _initial_scan_done.
-        if not self._initial_scan_done and (not state.installed or has_update):
+        # Optional extras (apps, extra languages) are never pre-checked when
+        # missing - only an update to one that's already installed is.
+        component = self.component_by_key.get(key)
+        wanted = (not state.installed and not (component and component.optional)) or has_update
+        if not self._initial_scan_done and wanted:
             item.setCheckState(COL_NAME, Qt.CheckState.Checked)
 
         self._update_category_summaries()
@@ -966,7 +973,7 @@ class MainWindow(QMainWindow):
                 menu.addAction("Reinstall").triggered.connect(lambda: self._start_install({key}, force=True))
             menu.addSeparator()
 
-        if state is not None and state.installed and component.path_entry is not None:
+        if state is not None and state.installed and (component.location or component.path_entry) is not None:
             open_action = menu.addAction("Open install location")
             open_action.triggered.connect(lambda: self._open_install_location(component))
 
@@ -1066,10 +1073,11 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _open_install_location(component: Component):
-        if component.path_entry is None:
+        finder = component.location or component.path_entry
+        if finder is None:
             return
         try:
-            entry = component.path_entry()
+            entry = finder()
         except Exception:
             entry = None
         if entry is None or not entry.is_dir():
@@ -1147,7 +1155,8 @@ class MainWindow(QMainWindow):
         # ScanWorker's background thread.
         for key, item in self.tree_items.items():
             state, latest = self._scan_results.get(key, (InstalledState(installed=False), None))
-            needs_action = not state.installed or self._has_update(state, latest)
+            component = self.component_by_key[key]
+            needs_action = (not state.installed and not component.optional) or self._has_update(state, latest)
             item.setCheckState(COL_NAME, Qt.CheckState.Checked if needs_action else Qt.CheckState.Unchecked)
 
     def _selected_keys(self) -> set[str]:
@@ -1611,14 +1620,19 @@ class MainWindow(QMainWindow):
                 rows.append(("Downloads from", html.escape(latest.url)))
             if latest.sha256:
                 rows.append(("SHA-256", f'<span style="font-family:Consolas">{latest.sha256}</span>'))
-        if component.path_entry is not None:
+        finder = component.location or component.path_entry
+        if finder is not None:
             try:
-                entry = component.path_entry()
+                entry = finder()
             except Exception:
                 entry = None
             if entry is not None:
                 rows.append(("Install location", html.escape(str(entry))))
         rows.append(("Can uninstall", "yes" if component.uninstall is not None else "no — Windows or other software may depend on it"))
+        if component.optional:
+            rows.append(("Optional", "never pre-checked by a scan or Select needed"))
+        if component.note:
+            rows.append(("Note", html.escape(component.note)))
 
         table = "".join(
             f'<tr><td style="color:{dim}; padding-right:18px; vertical-align:top">{k}</td>'

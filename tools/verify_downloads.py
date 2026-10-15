@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import definitions, downloader
+from core import catalog, definitions, downloader
 from core.definitions import InstallContext
 from core.logger import setup_logging
 
@@ -41,13 +41,22 @@ def main() -> int:
     # Nothing is executed or installed - the "run" steps are stubbed out.
     calls = []
 
-    def fake_run(path, args_, name, dry_run=False):
+    def fake_run(path, args_, name, dry_run=False, **_kwargs):
         calls.append(name)
         return downloader.reverify(Path(path), name) is not False
 
-    definitions.run_exe = fake_run
-    definitions.run_msi = fake_run
-    definitions._add_appx_package = lambda p: downloader.reverify(Path(p), p.name) is not False
+    def still_verifies(path, *_rest):
+        return downloader.reverify(Path(path), Path(path).name) is not False
+
+    for module in (definitions, catalog):
+        module.run_exe = fake_run
+        module.run_msi = fake_run
+        module._add_appx_package = lambda p: still_verifies(p)
+    # catalog.py: nothing below may touch the machine either.
+    catalog._winget_run = lambda *a, **k: True          # winget components: no download of ours to check
+    catalog._dism_feature = lambda *a, **k: True
+    catalog._place_zip_exes = lambda zip_path, scratch, dest: still_verifies(zip_path)
+    catalog._extract_zip_tree = lambda zip_path, dest: still_verifies(zip_path)
 
     results = []
     for comp in definitions.build_components():

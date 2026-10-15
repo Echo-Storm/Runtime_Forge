@@ -174,9 +174,12 @@ def any_reg_key_exists(hive: str, subkeys: list[str]) -> bool:
     return any(reg_key_exists(hive, subkey) for subkey in subkeys)
 
 
+# (hive, key) pairs. Per-user installs (VS Code, Discord, Inno Setup 7, MSYS2
+# via winget...) register under HKCU, not HKLM.
 _UNINSTALL_ROOTS = [
-    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
 ]
 
 
@@ -244,9 +247,9 @@ def _uninstall_entries() -> List[dict]:
     with _snapshot_lock:
         if _uninstall_snapshot is None:
             rows: List[dict] = []
-            for root in _UNINSTALL_ROOTS:
+            for hive, root in _UNINSTALL_ROOTS:
                 rows += _read_subkeys(
-                    winreg.HKEY_LOCAL_MACHINE, root,
+                    hive, root,
                     ("DisplayName", "DisplayVersion", "QuietUninstallString", "UninstallString"),
                 )
             _uninstall_snapshot = rows
@@ -320,6 +323,42 @@ def parse_command_line(command: str) -> List[str]:
         return [argv_ptr[i] for i in range(argc.value)]
     finally:
         ctypes.windll.kernel32.LocalFree(argv_ptr)
+
+
+_APPX_REPOSITORY = (
+    r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion"
+    r"\AppModel\Repository\Packages"
+)
+
+
+def appx_package_version(name: str, publisher_id: str) -> Optional[str]:
+    """Version of an installed MSIX/Appx package for the current user, read
+    from the package repository in the registry - no PowerShell, no
+    Get-AppxPackage. Package full names look like
+    `Microsoft.WindowsTerminal_1.24.12741.0_x64__8wekyb3d8bbwe`
+    (Name_Version_Arch_ResourceId_PublisherId); matching on both the name and
+    the publisher id keeps e.g. Windows Terminal from matching its Preview
+    sibling. Returns the highest installed version, or None."""
+    prefix, suffix = f"{name}_", f"__{publisher_id}"
+    best, best_key = None, ()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _APPX_REPOSITORY) as packages:
+            i = 0
+            while True:
+                try:
+                    full_name = winreg.EnumKey(packages, i)
+                except OSError:
+                    break
+                i += 1
+                if not (full_name.startswith(prefix) and full_name.endswith(suffix)):
+                    continue
+                version = full_name[len(prefix):].split("_", 1)[0]
+                key = tuple(int(p) for p in re.findall(r"\d+", version))
+                if key > best_key:
+                    best, best_key = version, key
+    except OSError:
+        return None
+    return best
 
 
 def find_dependency_by_display_name(pattern: "re.Pattern[str]") -> Optional[str]:

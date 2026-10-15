@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+- **Windows Terminal is now installable** (it wasn't offered before, though the
+  bundled terminal profile depends on it). The profile refuses to apply when
+  Terminal isn't there instead of creating an orphan settings folder.
+- **Legacy Game Support**: DirectPlay, XNA Framework 4.0, NVIDIA PhysX.
+- **Go & Rust** category; **uv** under Python; **MSYS2**, **Inno Setup** and
+  **Ghidra** under Dev Tools.
+- **Apps** (optional): Chrome, Discord, AnyDesk, Claude. Optional components are
+  never pre-checked by a scan or Select needed (updates to installed ones still are).
+- Components can carry a note (shown in the Details tab) and an explicit
+  install location.
+- Per-user installs (VS Code, MSYS2, Inno Setup 7...) are now found through the
+  HKCU Uninstall key — VS Code can finally be uninstalled from the app.
+- 62 components (was 48); tools/run_tests.py, tools/verify_downloads.py cover them.
+
 ## 0.3.0
 - **New window.** Full-width tree (Status / Installed / Latest), search and
   All / Needs action / Installed filter, Details / Log / PATH backups tabs,

@@ -81,6 +81,14 @@ class Component:
     # than caching one - see _generic_registry_uninstall's docstring for
     # why the command can't be trusted verbatim from the registry either.
     uninstall: Optional[Callable[[InstallContext], bool]] = None
+    # Optional extras (apps, extra languages, tools most machines don't need):
+    # never pre-checked on the first scan and skipped by "Select needed".
+    optional: bool = False
+    # One line of "good to know" shown in the Details tab (what it needs, where it installs).
+    note: str = ""
+    # Where this component lives, for "Open install location" - for things that
+    # aren't on PATH (path_entry doubles as the PATH check, so it can't be used).
+    location: Optional[Callable[[], Optional[Path]]] = None
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest_dir: Path) -> None:
@@ -1685,6 +1693,12 @@ def _terminal_profile_install(ctx: InstallContext) -> bool:
         return True
 
     target_dir = _TERMINAL_PROFILE_TARGET.parent
+    if not target_dir.parent.is_dir():
+        log.fail(
+            "Windows Terminal doesn't appear to be installed (its settings folder doesn't exist) - "
+            "install Windows Terminal first, then apply this profile"
+        )
+        return False
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -1715,6 +1729,12 @@ def _terminal_profile_install(ctx: InstallContext) -> bool:
 # ---------------------------------------------------------------------------
 # REGISTRY
 # ---------------------------------------------------------------------------
+
+CATEGORY_ORDER = [
+    "Core Runtimes", "Legacy Game Support", "VC++ Redistributables", ".NET Runtimes", ".NET SDK",
+    "Java (Temurin JDK)", "Python", "Go & Rust", "Dev Tools", "Archive Tools", "Apps", "Extras",
+]
+
 
 def build_components() -> List[Component]:
     components: List[Component] = [
@@ -1779,13 +1799,10 @@ def build_components() -> List[Component]:
                    uninstall=_generic_registry_uninstall(re.compile(r"^Node\.js$"), "Node.js")),
         Component("cmake", "CMake", "Dev Tools", _cmake_is_installed, _cmake_install, _cmake_resolve_latest, path_entry=_cmake_path_entry,
                    uninstall=_generic_registry_uninstall(re.compile(r"^CMake$"), "CMake")),
-        # Visual Studio Code deliberately has no uninstall wired up: its
-        # installer defaults to a per-user install that registers under
-        # HKCU, not HKLM (confirmed by its absence from a real machine's
-        # HKLM Uninstall keys despite genuinely being installed) —
-        # find_uninstall_command_by_display_name only scans HKLM, so it
-        # would silently never find a per-user VS Code install anyway.
-        Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install, _vscode_resolve_latest, path_entry=_vscode_path_entry),
+        # VS Code installs per-user and registers under HKCU, which the
+        # registry reader covers (with its own QuietUninstallString).
+        Component("vscode", "Visual Studio Code", "Dev Tools", _vscode_is_installed, _vscode_install, _vscode_resolve_latest, path_entry=_vscode_path_entry,
+                   uninstall=_generic_registry_uninstall(re.compile(r"^Microsoft Visual Studio Code"), "Visual Studio Code")),
         Component("gh", "GitHub CLI", "Dev Tools", _gh_is_installed, _gh_install, _gh_resolve_latest, path_entry=_gh_path_entry,
                    uninstall=_generic_registry_uninstall(re.compile(r"^GitHub CLI$"), "GitHub CLI")),
         # LLVM's own Uninstall.exe (NSIS-based) has no QuietUninstallString
@@ -1810,7 +1827,15 @@ def build_components() -> List[Component]:
         # — /S is its documented silent-uninstall flag.
         Component("winrar", "WinRAR", "Archive Tools", _winrar_is_installed, _winrar_install, _winrar_resolve_latest, path_entry=_winrar_path_entry,
                    uninstall=_silent_flag_uninstall(re.compile(r"^WinRAR"), "WinRAR", ["/S"])),
-        Component("terminal_profile", "Windows Terminal Profile (color-coded, per dev tool)", "Extras", _terminal_profile_is_installed, _terminal_profile_install),
+        Component("terminal_profile", "Windows Terminal Profile (color-coded, per dev tool)", "Extras", _terminal_profile_is_installed, _terminal_profile_install,
+                   note="Needs Windows Terminal installed first. Replaces settings.json (a timestamped backup is kept next to it)."),
     ]
 
+    # Imported here, not at the top: catalog builds on this module's helpers.
+    from core import catalog
+    components += catalog.build_catalog()
+
+    # Tree order: group by category, in a deliberate order (stable within a category).
+    rank = {category: i for i, category in enumerate(CATEGORY_ORDER)}
+    components.sort(key=lambda c: rank.get(c.category, len(CATEGORY_ORDER)))
     return components

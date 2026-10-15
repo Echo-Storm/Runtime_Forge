@@ -105,16 +105,16 @@ try:
     for i in range(25):
         checks.find_uninstall_entry_by_display_name(re.compile(f"no-such-program-{i}"))
         checks.find_dependency_by_display_name(re.compile(f"no-such-dependency-{i}"))
-    # 2 uninstall roots + 1 dependencies key, each read exactly once
-    results["registry_read_once_for_many_lookups"] = reads["n"] == 3
+    # 3 uninstall roots (HKLM, HKLM Wow6432Node, HKCU) + 1 dependencies key, each read exactly once
+    results["registry_read_once_for_many_lookups"] = reads["n"] == 4
 
     checks.invalidate_registry_cache()
     checks.find_uninstall_entry_by_display_name(re.compile("x"))
-    results["invalidate_forces_reread"] = reads["n"] == 5
+    results["invalidate_forces_reread"] = reads["n"] == 7
 
     before = reads["n"]
     checks.find_uninstall_command_by_display_name(re.compile("no-such-program"))
-    results["uninstall_command_lookup_always_fresh"] = reads["n"] == before + 2
+    results["uninstall_command_lookup_always_fresh"] = reads["n"] == before + 3
 finally:
     checks._read_subkeys = real_read
 

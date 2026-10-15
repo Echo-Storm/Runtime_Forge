@@ -148,6 +148,10 @@ try:
         "jdk_21", "jdk_17", "jdk_8",
         "pwsh", "git", "node", "cmake", "gh", "llvm", "ninja", "jq",
         "7zip", "winrar",
+        "vscode",  # per-user install: found through the HKCU Uninstall key
+        # from core/catalog.py
+        "directplay", "xna40", "physx", "go", "rust", "uv", "ghidra",
+        "chrome", "discord", "anydesk", "claude", "msys2", "innosetup",
     }
     # Explicitly verify the deliberately-excluded ones stayed excluded -
     # these exclusions are load-bearing safety decisions (fragmented
@@ -155,7 +159,7 @@ try:
     # no uninstaller ever existing), not oversights, and a future
     # component-list change silently enabling one of these should fail
     # this test rather than ship unnoticed.
-    excluded = ["winget", "directx", "openal", "webview2", "vscode",
+    excluded = ["winget", "directx", "openal", "webview2", "terminal",
                 "vc_2005_x86", "vc_2015-2022_x64",
                 "net_.NET 8 ASP.NET Core Runtime", "net_.NET Framework 4.8.1",
                 "python_3.13", "terminal_profile"]

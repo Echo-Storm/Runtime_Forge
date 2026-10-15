@@ -27,7 +27,7 @@ def _precheck(path: Path, name: str) -> bool:
     return verified
 
 
-def run_exe(path: Path, args: List[str], name: str, dry_run: bool = False) -> bool:
+def run_exe(path: Path, args: List[str], name: str, dry_run: bool = False, timeout: int = 900) -> bool:
     log = get_logger()
     if dry_run:
         log.dry(f"Would run: {name}  ({path} {' '.join(args)})")
@@ -42,7 +42,7 @@ def run_exe(path: Path, args: List[str], name: str, dry_run: bool = False) -> bo
     try:
         result = subprocess.run(
             [str(path), *args],
-            timeout=900,
+            timeout=timeout,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         log.status(f"       Exit code: {result.returncode}")
