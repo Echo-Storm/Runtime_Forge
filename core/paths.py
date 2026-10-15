@@ -22,3 +22,17 @@ def get_app_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
+
+
+def get_bundle_dir() -> Path:
+    """
+    Folder bundled read-only data files (assets/) live in.
+
+    PyInstaller 6+ onedir builds put `datas` under _internal/ (sys._MEIPASS),
+    not next to the exe like 5.x did, so assets can't be found via
+    get_app_dir() once frozen. From source it's the project root, same as
+    get_app_dir().
+    """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    return Path(__file__).resolve().parent.parent

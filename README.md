@@ -10,8 +10,8 @@ Runtime Forge
 <img alt="License" src="https://img.shields.io/badge/license-MIT-informational">
 </p>
 
-A Qt6 (PyQt6) desktop GUI for the same install list as the original [AIO
-Runtime & Dev Tool Installer](https://github.com/Echo-Storm/2026-AIO-Runtime-Dev-Tool-Installer)
+A Qt6 (PyQt6) desktop GUI for the same install list as the original AIO
+Runtime & Dev Tool Installer
 PowerShell script — one-click install of the legacy and modern runtimes,
 libraries, and dev tools needed for old games, modern apps, and build
 environments on Windows 11 — with a real interface on top instead of a

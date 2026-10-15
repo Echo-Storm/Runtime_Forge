@@ -15,10 +15,11 @@ a = Analysis(
     ['runtime_forge.py'],
     pathex=[],
     binaries=[],
-    # Copies the whole assets/ folder next to the built exe (get_app_dir()
-    # resolves to that same directory when frozen) — needed now that
-    # windows_terminal_settings.json is a real runtime-read data file, not
-    # just a build-time icon resource like everything previously in here.
+    # Bundles the whole assets/ folder (lands in _internal/assets with
+    # PyInstaller 6+; resolved at runtime via core.paths.get_bundle_dir()) —
+    # needed now that windows_terminal_settings.json is a real runtime-read
+    # data file, not just a build-time icon resource like everything
+    # previously in here.
     datas=[('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],

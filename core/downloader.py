@@ -59,6 +59,9 @@ def download(
             with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "Runtime-Forge"}) as resp:
                 resp.raise_for_status()
                 total = int(resp.headers.get("Content-Length", 0)) or None
+                # Content-Length counts the encoded bytes; a gzip'd body decodes
+                # to a different size, so only verify length for identity encoding.
+                verify_len = total if not resp.headers.get("Content-Encoding") else None
                 downloaded = 0
                 with open(dest_path, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
@@ -70,6 +73,8 @@ def download(
                             progress_cb(f"Downloading {name}...", downloaded / total)
 
             size = dest_path.stat().st_size
+            if verify_len and size != verify_len:
+                raise ValueError(f"Download truncated ({size} of {verify_len} bytes)")
             if size < MIN_PLAUSIBLE_BYTES:
                 raise ValueError(f"Downloaded file is implausibly small ({size} bytes) - likely not the real installer")
 

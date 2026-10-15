@@ -33,7 +33,7 @@ from core import checks, path_backup
 from core.downloader import download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
-from core.paths import get_app_dir
+from core.paths import get_bundle_dir
 from core.signature import check_signature
 from core.version_resolvers import LatestInfo, get_latest_adoptium, get_latest_github_asset, get_latest_node_lts
 
@@ -1605,7 +1605,7 @@ _TERMINAL_PROFILE_TARGET = (
 
 
 def _terminal_profile_source() -> Path:
-    return get_app_dir() / "assets" / "windows_terminal_settings.json"
+    return get_bundle_dir() / "assets" / "windows_terminal_settings.json"
 
 
 def _file_sha256(path: Path) -> Optional[str]:
