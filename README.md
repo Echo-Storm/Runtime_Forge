@@ -121,6 +121,7 @@ Using the app
 - **Updates:** the packaged app makes one quiet request to GitHub at launch
   and shows "v0.x available" in the status bar when a newer release exists
   (☰ → "Check for app updates" turns it off).
+- **Make the newest Python the default:** ☰ menu — see *Python* below.
 - Shortcuts: Ctrl+F search, Ctrl+R rescan.
 
 Running from source
@@ -228,9 +229,18 @@ Adoptium's `temurin<N>-binaries` GitHub releases (falling back to the
 Adoptium API), with the release's SHA-256 verified before running it.
 
 **Python** — 3.10, 3.11, 3.12, 3.13, 3.14 (pinned patch versions, all-users
-install with PATH and the launcher). python.org only publishes Windows
-installers for a series until it goes security-only, so 3.10–3.12 are pinned
-to their last installer release. Also here: **uv**, the fast Python package
+install with the launcher). python.org only publishes Windows installers for a
+series until it goes security-only, so 3.10–3.12 are pinned to their last
+installer release.
+
+*Only the newest series goes on PATH*, and first, so `python` and `pip` mean the
+newest; the older ones install side by side and are reached with the launcher
+(`py -3.12`). Installs are found through the registry the way the launcher finds
+them, so a Python in a custom folder (`E:\Python314`) counts as installed. If
+several ended up on PATH anyway (older installs, `pip --user` folders), **☰ →
+"Make the newest Python the default…"** shows exactly what it will change, backs
+PATH up, moves the newest to the front and takes the others' folders off PATH. The
+older Pythons stay installed. Also here: **uv**, the fast Python package
 manager (portable — placed in `Program Files\uv` and added to PATH).
 
 **Dev Tools** — PowerShell 7, Git for Windows, Node.js (LTS), CMake, Visual

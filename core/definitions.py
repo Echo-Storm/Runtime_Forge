@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from core import checks, http_cache, path_backup
+from core import checks, http_cache, path_backup, python_default
 from core.downloader import Trust, download
 from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
@@ -1094,8 +1094,19 @@ _PY_DEFS = [
 ]
 
 
+_NEWEST_PY = max(_PY_DEFS, key=lambda p: tuple(int(n) for n in p.ver.split(".")))
+
+
+def _py_registered(py: _PyDef) -> Optional["python_default.PythonInstall"]:
+    """This series as registered in the registry (PEP 514), wherever it was
+    installed - python.org's installer lets people pick any folder."""
+    wanted = tuple(int(n) for n in py.ver.split("."))
+    return next((p for p in python_default.installed_pythons() if p.key == wanted), None)
+
+
 def _py_dir(py: _PyDef) -> Path:
-    return PROGRAM_FILES / f"Python{py.ver.replace('.', '')}"
+    registered = _py_registered(py)
+    return registered.install_dir if registered else PROGRAM_FILES / f"Python{py.ver.replace('.', '')}"
 
 
 def _py_path_entry(py: _PyDef) -> Optional[Path]:
@@ -1134,7 +1145,12 @@ def _py_install(py: _PyDef, ctx: InstallContext) -> bool:
                     trust=Trust(publishers=("Python Software Foundation",)))
     if not file:
         return False
-    return run_exe(file, ["/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_launcher=1"], f"Python {py.ver}", ctx.dry_run)
+    # Only the newest series goes on PATH (and first): `python` / `pip` should mean
+    # the newest, and each older one stays reachable through the launcher
+    # (`py -3.12`). Putting every version on PATH just makes the last one
+    # installed win.
+    prepend = "1" if py is _NEWEST_PY else "0"
+    return run_exe(file, ["/quiet", "InstallAllUsers=1", f"PrependPath={prepend}", "Include_launcher=1"], f"Python {py.ver}", ctx.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -1791,7 +1807,13 @@ def build_components() -> List[Component]:
             lambda py=py: _py_is_installed(py),
             lambda ctx, py=py: _py_install(py, ctx),
             lambda py=py: _py_resolve_latest(py),
-            path_entry=lambda py=py: _py_path_entry(py),
+            path_entry=(lambda py=py: _py_path_entry(py)) if py is _NEWEST_PY else None,
+            location=lambda py=py: _py_dir(py),
+            note=(
+                "The newest series: its folder goes first on PATH, so `python` and `pip` mean this one."
+                if py is _NEWEST_PY else
+                f"Installed side by side and kept off PATH - run it with `py -{py.ver}`."
+            ),
         ))
 
     components += [

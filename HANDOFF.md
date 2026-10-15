@@ -9,7 +9,7 @@ For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for
 - **Repo:** <https://github.com/Echo-Storm/Runtime_Forge>, branch `main`, public.
 - **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1 (v0.1.0 was deleted — its installer had been
   built from a stale `dist/`). Latest is v0.4.1.
-- **Tests:** 23 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
+- **Tests:** 24 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
 - **First real run (v0.4.0, elevated, on the author's machine — see the log summary below):**
   13 installs succeeded, 3 were falsely reported failed (DirectPlay, VC++ 2015-2022 x86/x64 —
   detection bugs, fixed in 0.4.1). The log lives in `%LOCALAPPDATA%\RuntimeForge\RuntimeForge_Log_*.txt`.
@@ -96,13 +96,19 @@ assets/                 icon, banner, screenshots, tick/dash/chevron images, Win
 - Only the **packaged** app checks for newer releases; a source checkout doesn't
   (`RF_FORCE_UPDATE_CHECK=1` forces it).
 
-## What the first real run showed (v0.4.0 log)
+## What the first real runs showed (v0.4.0 and v0.4.1 logs)
 
 Verified working end to end, elevated: **Vulkan, XNA 4.0, .NET 10 ASP.NET + Desktop runtimes,
 .NET 8 SDK (fresh) + .NET 10 SDK (update), Python 3.13 update, uv, Node.js, VS Code update,
 ninja, jq, Windows Terminal update** — signatures/hashes all passed, post-install verification
 passed. The signer for the .NET installers reads ".NET (Microsoft Corporation)", which the
 allowlist matches on the organization.
+
+**v0.4.1 run (elevated): 9 installed, 0 failed** — Go (SHA-256 + Google signature), Rust
+(rustup, ~20 s for the toolchain), Ghidra (extracted in ~10 s), Chrome (MSI), Windows App (via
+winget; the post-install `winget list` check flipped it to Installed), .NET 10 runtimes/SDK, and
+the Windows Terminal profile (backup written first). So Go, Rust, Ghidra, Chrome and one winget
+install are now proven for real.
 
 Found and fixed in 0.4.1:
 - DirectPlay: dism succeeded but detection looked for a 64-bit `dplayx.dll` that doesn't exist.
@@ -116,32 +122,45 @@ Found and fixed in 0.4.1:
 (Verified offline only: downloads, hashes, signatures, detection, command construction.)
 
 - [ ] The **installer itself** (UAC prompt, Start Menu shortcut, uninstall).
-- [ ] **Rust**: `rustup-init -y …` (needs the MSVC build tools to *link*); `rustup self uninstall`.
-- [ ] **Ghidra**: ~500 MB extraction into `Program Files\Ghidra`; needs JDK 21.
-- [ ] **Go** MSI (PATH, uninstall via the registry entry), **Chrome** enterprise MSI.
-- [ ] The **winget-backed** set — Discord, AnyDesk, Claude, MSYS2, Inno Setup, PhysX, Firefox, Edge,
-      OneDrive, Windows App, Steam, Epic, K-Lite, IrfanView, Notepad++, Sublime. Command:
+- [ ] **Uninstall** paths for Rust (`rustup self uninstall`), Ghidra, Go, Chrome, uv (none exercised).
+- [x] ~~Rust / Ghidra / Go / Chrome installs~~ — proven in the v0.4.1 log.
+- [ ] The rest of the **winget-backed** set — Discord, AnyDesk, Claude, MSYS2, Inno Setup, PhysX, Firefox, Edge,
+      OneDrive, Steam, Epic, K-Lite, IrfanView, Notepad++, Sublime (Windows App is proven). Command:
       `winget install --id … -e --silent --accept-package-agreements --accept-source-agreements
       --disable-interactivity`. Watch exit codes, per-user installs under an elevated process, and
       the detection patterns in `catalog.py`. **Windows App** detection asks `winget list` (it
       leaves no registry entry we could verify) — check it flips to "Installed" after installing.
 - [ ] *Optional* behavior on a fresh machine: the first scan pre-checks only non-optional missing items.
 - [ ] The status-bar "v0.x available" button once a newer release than the running one exists.
-- [ ] Uninstall paths for the new components (none have been exercised).
+- [ ] **Make the newest Python the default** (☰ menu) on a machine with several on PATH — the plan was
+      dry-run against the author's real PATH and unit-tested, but never applied elevated.
+
+## Python default (v0.4.2, unreleased)
+
+`core/python_default.py` — discovery via PEP 514 (`HKLM/HKCU\SOFTWARE\Python\PythonCore`), a pure
+`plan_make_default()` and `apply_plan()` (writes through `path_backup.write_paths`). Installs only pass
+`PrependPath=1` for `definitions._NEWEST_PY`. Default always lands at the front of the **machine** PATH,
+because machine entries are resolved before user entries (a per-user newest Python — like the author's
+`E:\Python314` — could never win from the user PATH). Windows Terminal's bundled profile still uses
+`C:\Program Files\Python3xx` paths, so a custom-folder Python has a dead profile entry (backlog).
 
 ## What's next (suggested order)
 
 1. Whatever the test pass above turns up.
-2. **Declarative component specs** — `definitions.py` is ~1,800 lines and ~15 components repeat
+2. **A pinned `versions.json` fetched from the repo** (raw.githubusercontent.com, a CDN — not
+   rate limited like `api.github.com`), refreshed by a scheduled GitHub Action that resolves each
+   component's latest version + SHA-256 and opens a reviewable PR. One request replaces ~20 API calls
+   and gives every download a reviewed hash. (Both runs' logs show the 60/hour limit biting on first launch.)
+3. **Declarative component specs** — `definitions.py` is ~1,800 lines and ~15 components repeat
    resolve → download → verify → run. A small spec type (like the winget factory in
    `catalog.py`) would make a new tool a few lines, and could load from a JSON catalog.
-3. **CI**: GitHub Actions on `windows-latest` running `tools/run_tests.py`, and building the
+4. **CI**: GitHub Actions on `windows-latest` running `tools/run_tests.py`, and building the
    installer + attaching it to a release on tag (needs Inno Setup via choco).
-4. **Windows Terminal profile merge** instead of replace (merge profiles by GUID; keep the user's own).
-5. **Code signing** for the exe/installer (SmartScreen warns today).
-6. **On-demand elevation**: launch un-elevated and only elevate when something needs it
+5. **Windows Terminal profile merge** instead of replace (merge profiles by GUID; keep the user's own).
+6. **Code signing** for the exe/installer (SmartScreen warns today).
+7. **On-demand elevation**: launch un-elevated and only elevate when something needs it
    (the manifest currently forces admin; a prototype idea is a `requires_admin` flag per component).
-7. Update detection for the winget-backed apps (winget's manifests lag the vendors, so a naive
+8. Update detection for the winget-backed apps (winget's manifests lag the vendors, so a naive
    compare would nag forever — needs care).
-8. ARM64 Windows (everything assumes x64), Python 3.15 when it ships, more tools from the wishlist
-   (Notepad++, PowerToys, Sysinternals, mpv, ffmpeg).
+9. ARM64 Windows (everything assumes x64), Python 3.15 when it ships, more tools from the wishlist
+   (PowerToys, Sysinternals, mpv, ffmpeg, foobar2000).

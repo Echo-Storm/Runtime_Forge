@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+- **Only the newest Python is the default.** Installing Python no longer puts every
+  version on PATH (the last one installed used to win): only the newest series gets
+  `PrependPath`, the older ones stay reachable with `py -3.12`.
+- **☰ → "Make the newest Python the default…"** fixes a machine that already has several
+  on PATH: previews the change, backs PATH up, puts the newest python.org Python first on
+  the machine PATH (machine entries outrank user entries) and removes the others' folders,
+  including their `%APPDATA%\Python\PythonXY` user-site folders. Nothing is uninstalled.
+- Python installs are detected through the registry (PEP 514), so a Python in a custom
+  folder (`E:\Python314`) now shows as installed instead of "not installed".
+- Housekeeping: an unused import, a docstring warning in `tools/screenshot.py`.
+
 ## 0.4.1
 Fixes from the first real elevated run of 0.4.0 (13 installs succeeded; 3 were
 falsely reported as failed), plus the rest of the everyday apps.

@@ -1,4 +1,4 @@
-"""Renders the main window (after a real scan) to a PNG for the README and visual checks.
+r"""Renders the main window (after a real scan) to a PNG for the README and visual checks.
 
     venv\Scripts\python.exe tools\screenshot.py out.png [options]
 

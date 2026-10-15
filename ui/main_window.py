@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QEvent, QObject, QMimeData, Qt, QSettings, QUrl
+from PyQt6.QtCore import QEvent, QObject, Qt, QSettings, QUrl
 from PyQt6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from core import http_cache, path_backup, profiles
+from core import http_cache, path_backup, profiles, python_default
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_bundle_dir, get_data_dir
@@ -309,6 +309,10 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         expand = menu.addAction("Expand all")
         collapse = menu.addAction("Collapse all")
+        menu.addSeparator()
+        self.python_default_action = menu.addAction("Make the newest Python the default…")
+        self.python_default_action.setToolTip("Put the newest python.org Python first on PATH and take the older ones off it")
+        self.python_default_action.triggered.connect(self._on_make_python_default)
         menu.addSeparator()
         theme_menu = menu.addMenu("Theme")
         self.theme_group = QActionGroup(self)
@@ -1468,6 +1472,68 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Restore Failed",
                 "Could not write PATH to the registry — this needs to run elevated.",
+            )
+
+    # ------------------------------------------------------------------
+    # Python default
+    # ------------------------------------------------------------------
+
+    def _on_make_python_default(self):
+        """`python` / `pip` mean whichever python.org Python's folder comes first on
+        PATH. This makes that the newest one and takes the others' folders off PATH
+        (they stay installed; `py -3.12` still reaches them). Always backs PATH up first."""
+        if self._is_busy():
+            QMessageBox.information(self, "Busy", "Wait for the current install/uninstall/scan to finish first.")
+            return
+        pythons = python_default.installed_pythons()
+        machine, user = path_backup.read_current_path()
+        plan = python_default.plan_make_default(machine, user, pythons)
+        if plan is None:
+            QMessageBox.information(
+                self, "No Python Found",
+                "No python.org Python is registered on this machine. Tick one under Python and install it first.",
+            )
+            return
+        latest = plan.latest
+        others = ", ".join(p.version for p in pythons[1:]) or "none"
+        if not plan.changed:
+            QMessageBox.information(
+                self, "Already the Default",
+                f"Python {latest.version} ({latest.install_dir}) is already the only default on PATH.\n"
+                f"Other installed versions (kept): {others}.",
+            )
+            return
+
+        details = [f"Remove from PATH ({scope}):  {entry}" for scope, entry in plan.removed]
+        details += [f"Put first on PATH ({scope}):  {entry}" for scope, entry in plan.added]
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Make Python the Default")
+        box.setText(f"Make Python {latest.version} the default?")
+        box.setInformativeText(
+            f"{latest.install_dir}\n\n"
+            f"`python` and `pip` will mean {latest.version}. Other installed versions ({others}) stay installed "
+            f"and keep working through the launcher (e.g. `py -3.12`). PATH is backed up first, so this can be "
+            f"undone from the PATH backups tab. Terminals that are already open need restarting."
+        )
+        box.setDetailedText("\n".join(details) or "(no entries to change)")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        path_backup.create_backup(self.app_dir, f"before making Python {latest.version} the default")
+        ok = python_default.apply_plan(plan)
+        self._refresh_path_backup_combo()
+        if ok:
+            self.status_bar.showMessage(f"Python {latest.version} is now the default", 8000)
+            QMessageBox.information(
+                self, "Python Default Updated",
+                f"Python {latest.version} is now first on PATH. Open a new terminal and run `python --version` to confirm.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Could Not Change PATH",
+                "Windows refused the change - editing the machine PATH needs the app to run as administrator.",
             )
 
     # ------------------------------------------------------------------

@@ -245,6 +245,27 @@ def remove_directory_from_path(dir_path: Path) -> bool:
     return True
 
 
+def write_paths(machine: Optional[str], user: Optional[str]) -> bool:
+    """Writes the machine and/or user PATH (None leaves that one alone) and
+    broadcasts the change. The machine PATH needs elevation; False if either
+    write that was asked for failed. Callers back PATH up first."""
+    ok = True
+    for hive, subkey, value in ((winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY, machine),
+                                (winreg.HKEY_CURRENT_USER, _USER_ENV_KEY, user)):
+        if value is None:
+            continue
+        if not value.strip():
+            ok = False   # never write an empty PATH (same stance as create_backup / add_directory_to_path)
+            continue
+        try:
+            with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, value)
+        except OSError:
+            ok = False
+    _broadcast_environment_change()
+    return ok
+
+
 def _broadcast_environment_change() -> None:
     HWND_BROADCAST = 0xFFFF
     WM_SETTINGCHANGE = 0x1A
