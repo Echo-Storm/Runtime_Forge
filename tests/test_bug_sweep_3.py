@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox
 
 from core import path_backup, profiles
 from core.definitions import InstalledState
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from ui.main_window import MainWindow
 from ui.workers import InstallWorker, ResultStatus
 
@@ -40,7 +40,7 @@ window = MainWindow()
 window.show()
 
 results: dict[str, object] = {}
-app_dir = get_app_dir()
+app_dir = get_data_dir()
 
 
 def after_scan():

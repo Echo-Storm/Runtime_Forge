@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QApplication
 
 from core import path_backup, profiles
 from core.definitions import build_components
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from ui.main_window import MainWindow
 
 app = QApplication(sys.argv)
@@ -27,7 +27,7 @@ window = MainWindow()
 window.show()
 
 results: dict[str, object] = {}
-app_dir = get_app_dir()
+app_dir = get_data_dir()
 
 
 def after_scan():

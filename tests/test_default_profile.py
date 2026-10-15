@@ -15,13 +15,13 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 from core import profiles
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from ui.main_window import MainWindow
 
 app = QApplication(sys.argv)
 
 results: dict[str, object] = {}
-app_dir = get_app_dir()
+app_dir = get_data_dir()
 
 # Clean slate — this test owns the outcome of "profiles/ is empty", so
 # start from a state where that's actually true.

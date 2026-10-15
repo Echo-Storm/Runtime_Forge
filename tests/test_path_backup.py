@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import QApplication
 from core import path_backup
 from core.checks import is_dir_on_path
 from core.definitions import InstalledState
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from ui.main_window import MainWindow
 from ui.workers import InstallWorker
 
@@ -35,7 +35,7 @@ results: dict[str, object] = {}
 
 
 def after_scan():
-    app_dir = get_app_dir()
+    app_dir = get_data_dir()
     try:
         # --- is_dir_on_path sanity ---
         results["system32_is_on_path"] = is_dir_on_path(Path(r"C:\Windows\System32"))

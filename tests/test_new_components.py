@@ -24,10 +24,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.definitions import build_components
 from core.logger import setup_logging
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 from core.version_resolvers import version_is_newer
 
-setup_logging(get_app_dir())
+setup_logging(get_data_dir())
 
 results: dict[str, object] = {}
 NEW_KEYS = ["net_sdk_8.0", "net_sdk_9.0", "net_sdk_10.0", "gh", "llvm", "ninja", "jq", "7zip", "winrar"]

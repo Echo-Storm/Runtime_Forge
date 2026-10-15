@@ -33,15 +33,16 @@ What's different from the PowerShell version
 ----------------------------------------------
 - **See what's already installed** before doing anything — every component
   is scanned on launch and shows its installed version (and, where a newer
-  release exists, what's available) instead of a plain yes/no. Every one of
-  the 47 components reports its real installed version, not just presence;
-  31 have genuine update detection against a real source (a live API, or
-  this app's own pinned install target). The rest — DirectX, .NET Framework
-  4.8.1, WebView2, and pre-2015 VC++ redists — have no meaningful "latest
-  version" to compare against at all (verified, not just not gotten to:
-  DirectX's June 2010 redistributable is genuinely the final one Microsoft
+  release exists, what's available) instead of a plain yes/no. All 48
+  components report their real installed version, not just presence; 32 of
+  them can also be checked for updates against a real source (a live API, or
+  this app's own pinned install target). The other 16 — DirectX, .NET
+  Framework 3.5, WebView2, the VC++ redistributables and the Windows Terminal
+  profile — have no meaningful "latest version" to compare against at all
+  (DirectX's June 2010 redistributable is genuinely the final one Microsoft
   ever shipped, WebView2 self-updates in the background regardless of this
-  app, etc).
+  app, the VC++ installers are evergreen URLs rather than versioned
+  releases, and so on).
 - **Pick exactly what you want** — every VC++ redist year/arch, every .NET
   runtime piece, every JDK, every Python version, and every dev tool is its
   own checkbox, not an all-or-nothing run.
@@ -60,8 +61,8 @@ What's different from the PowerShell version
 - **PATH backups** — one automatic snapshot of the machine + user PATH per
   real install run (not per component), plus one baseline snapshot taken
   automatically the very first time the app is ever launched, before it's
-  touched anything. A manual "Backup Now" button covers everything in
-  between. All restorable from a dropdown with a before/after preview —
+  touched anything. The **PATH backups** tab's "Back up now" covers
+  everything in between. All restorable from a dropdown with a before/after preview —
   restoring itself takes a fresh backup first, so it's never a one-way door
   either.
 - **A "Basic" profile ships seeded on first run** — broad compatibility
@@ -73,29 +74,58 @@ What's different from the PowerShell version
   Deliberately not opinionated about the rest of dev tooling (Git/Node/
   CMake/VS Code/PowerShell). Only seeds if you have zero profiles at all —
   never overwrites or fights with anything you've built or renamed.
-- **Fast scans** — version lookups (GitHub/Adoptium/nodejs.org, ~7 of them)
-  run in parallel rather than one at a time; ~3.7s down to ~1s on a typical
-  scan. Presence checks stay sequential since they're already fast and, for
-  the install side, several installers here share Windows Installer's
-  single global lock — parallelizing *those* would risk real install
-  failures for a small time win, so only the genuinely parallelizable part
-  (independent network calls) is.
+- **Fast scans** — every component's presence check and latest-version lookup
+  runs concurrently (8 at a time); lookups share one in-process cache (the
+  nine .NET components share a single request, and installing reuses what
+  the scan already resolved), the registry's Uninstall keys are read once per
+  scan instead of once per component, and GitHub's rate limit is handled
+  (`GITHUB_TOKEN`, see below). Installs themselves stay strictly sequential —
+  several installers here share Windows Installer's single global lock, so
+  parallelizing *those* would risk real install failures for a small time win.
 - Fully Python install engine — no PowerShell dependency at runtime, aside
-  from a single narrow read-only Authenticode signature check and the
-  winget `.msixbundle` install step (Windows has no other ergonomic API for
-  either). Everything else runs `msiexec.exe`, `dism.exe`, or the vendor's
-  own downloaded installer directly via `subprocess`, exactly like the
-  original.
+  from the winget `.msixbundle` install step (Windows has no other ergonomic
+  API for it). Authenticode signatures are verified through `WinVerifyTrust`
+  directly. Everything else runs `msiexec.exe`, `dism.exe`, or the vendor's
+  own downloaded installer via `subprocess`, exactly like the original.
 - Requests admin elevation automatically via the packaged .exe's embedded
-  manifest — no separate elevation batch file.
+  manifest — no separate elevation batch file. (Run from source without
+  elevation and the window works for scanning, Dry Run, profiles and PATH
+  backups, with a banner offering a one-click relaunch as administrator.)
+
+Using the app
+-------------
+- **Tree:** Status / Installed / Latest per component; category rows summarize
+  themselves ("5 of 6 installed · 1 update"). Double-click a row to check it.
+- **Search and filter:** the box (Ctrl+F) matches component names; **All / Needs
+  action / Installed** narrows the list. "All" in the bottom bar checks only
+  what's currently visible.
+- **Select needed** checks everything missing or outdated. The **Install**
+  button always says what it will do ("Install 5 selected", or "Dry run 5
+  selected" when Dry run is on); the confirm dialog lists the components.
+- **Right-click a row** for Install / Update to X / Reinstall, Open install
+  location, Copy version, Copy download URL, Uninstall.
+- **Bottom pane:** *Details* (versions, download URL, SHA-256, install
+  location, whether it can be uninstalled), *Log* (colour-coded; Copy /
+  Clear / Open log file), *PATH backups*. Drag the divider to resize or
+  collapse it.
+- **Profiles:** pick one from the dropdown, **Manage** to save / update /
+  delete / import / export — or drop a profile `.json` anywhere on the window.
+- **Theme:** ☰ menu → Theme → Follow Windows (default), Dark or Light.
+- **Updates:** the packaged app makes one quiet request to GitHub at launch
+  and shows "v0.x available" in the status bar when a newer release exists
+  (☰ → "Check for app updates" turns it off).
+- Shortcuts: Ctrl+F search, Ctrl+R rescan.
 
 Running from source
 --------------------
 ```
 python -m venv venv
-venv\Scripts\pip install -r requirements.txt
-venv\Scripts\python runtime_forge.py
+venv\Scripts\python.exe -m pip install -r requirements.txt
+venv\Scripts\python.exe runtime_forge.py
 ```
+(Always go through `python.exe -m ...` rather than the `pip.exe` /
+`pyinstaller.exe` launchers in `venv\Scripts` — those embed the venv's
+original path and silently misbehave if the folder was ever moved.)
 Real installs need admin rights (most write to `HKLM`, `Program Files`, or
 `System32`) — launch an elevated terminal first, or build the exe (below),
 which prompts for elevation on its own. Running un-elevated is fine for
@@ -104,9 +134,11 @@ scanning and Dry Run.
 Building the .exe
 ------------------
 ```
-venv\Scripts\python.exe -m pip install pyinstaller
+venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 venv\Scripts\python.exe -m PyInstaller RuntimeForge.spec --clean
 ```
+(`RF_NO_ADMIN=1` builds a copy that doesn't demand elevation, handy for
+trying UI changes; release builds leave it unset.)
 Output lands in `dist\RuntimeForge\` — copy the whole folder to
 distribute. Running that folder directly is portable: settings
 (`RuntimeForge.ini`), logs, profiles and PATH backups are written next to the
@@ -133,18 +165,32 @@ task, no auto-start entry, and no tray icon/background service.
 
 Dev tools
 ---------
-- `tools/gen_icon.py` — regenerates `assets/icon.ico`/`icon.png`. Needs
-  Pillow (`pip install -r requirements-dev.txt`).
-- `tools/inspect_dll_version.py <path> [field ...]` — prints a DLL/EXE's PE
-  VERSIONINFO fields (ProductName, ProductVersion, etc). This is what caught
-  the OpenAL false-positive (an NVIDIA-bundled OpenAL32.dll passing a
-  filename-only check) — reach for it before guessing at a detection fix
-  when two binaries share a filename but not an identity.
-- `tests/` — one script per fix/feature, each driving a real MainWindow
-  (or component registry) instance directly rather than mocking anything.
-  Not a pytest suite — run any of them directly:
-  `venv\Scripts\python.exe tests\<name>.py`. Prints `ALL_OK: True/False`
-  and exits accordingly.
+Everything lives in `tools/`; run any of them with
+`venv\Scripts\python.exe tools\<name>.py`.
+
+| Tool | What it's for |
+|---|---|
+| `run_tests.py [filter...] [-v]` | Runs every `tests/test_*.py` in its own process (offscreen Qt, throw-away data dir) and prints one PASS/FAIL line each. |
+| `verify_downloads.py [--only k,k] [--skip k,k]` | Downloads every component through the real hash/signature checks without installing anything. Run it after touching a URL, hash or publisher. ~1.5 GB for everything. |
+| `screenshot.py [out.png] [--width N --height N] [--no-banner]` | Renders the real window after a real scan to a PNG (how `assets/screenshot.png` is made). |
+| `inspect_dll_version.py <path> [field ...]` | Prints a DLL/EXE's PE VERSIONINFO fields — what caught the OpenAL false-positive (an NVIDIA-bundled `OpenAL32.dll` passing a filename-only check). Reach for it when two binaries share a filename but not an identity. |
+| `gen_icon.py`, `gen_banner.py`, `gen_check.py` | Regenerate `assets/icon.*`, `assets/banner.png`, and the tick / dash / chevron images the stylesheet uses. Need Pillow (`requirements-dev.txt`). |
+
+**Tests** (`tests/`) are one script per fix or feature, each driving a real
+`MainWindow` (or the component registry) directly rather than mocking
+everything. Not a pytest suite: each prints `name: True/False` lines and
+`ALL_OK: True/False` and exits accordingly, so any one runs on its own
+(`venv\Scripts\python.exe tests\test_ui_redesign.py`) and `tools\run_tests.py`
+runs them all.
+
+**Environment variables**
+
+| Variable | Effect |
+|---|---|
+| `GITHUB_TOKEN` / `GH_TOKEN` | Lifts GitHub's 60-requests-an-hour limit for version lookups. Only ever sent to `api.github.com`. |
+| `RUNTIME_FORGE_DATA_DIR` | Redirects logs, `RuntimeForge.ini`, profiles and PATH backups (tests use it so they never touch real data). |
+| `RF_NO_ADMIN=1` | At *build* time: the exe won't demand elevation. |
+| `RF_FORCE_UPDATE_CHECK=1` | Makes a source checkout do the "newer release?" check the packaged app does. |
 
 What It Installs / Enables
 -----------------------------------------------
@@ -198,7 +244,7 @@ system, after decades of never enforcing its own trial — make it this one.
 Ask them on Twitter for a big discount first, though.
 
 **Extras** — a curated, color-coded Windows Terminal profile: one entry per
-Python version, a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
+Python version (3.10 – 3.14), a Node REPL, a JShell (JDK 21) REPL, Git Bash, MSYS2 (hidden
 by default, only useful if you have MSYS2), VS 2022 dev consoles, plus
 elevated variants of the shells. Bundled with this app
 (`assets/windows_terminal_settings.json`) rather than read from its

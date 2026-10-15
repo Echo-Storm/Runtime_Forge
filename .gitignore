@@ -12,3 +12,5 @@ testbuilds/
 temp_installers/
 profiles/
 path_backups/
+dist_test/
+build_test/

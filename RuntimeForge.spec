@@ -1,16 +1,21 @@
-import os
 # -*- mode: python ; coding: utf-8 -*-
 #
 # PyInstaller spec for Runtime Forge — onedir (folder) build.
 #
 # Build with:
-#   venv\Scripts\pyinstaller.exe RuntimeForge.spec --clean
+#   venv\Scripts\python.exe -m PyInstaller RuntimeForge.spec --clean
+# (use `python -m PyInstaller`, not venv\Scripts\pyinstaller.exe - that
+# launcher silently does nothing when the venv has been moved.)
 #
-# Output lands in dist\RuntimeForge\ — copy that whole folder to
-# distribute. uac_admin=True embeds a manifest that makes Windows prompt for
-# elevation automatically on launch (replaces the PS1 original's separate
-# RUN_ME.bat elevation wrapper). Settings/log files are written next to the
-# exe (see core/paths.py) — the folder is fully self-contained and portable.
+# Output lands in dist\RuntimeForge\ - copy that whole folder to
+# distribute, or wrap it with installer\RuntimeForge.iss. uac_admin embeds a
+# manifest that makes Windows prompt for elevation on every launch (replaces
+# the PS1 original's separate RUN_ME.bat elevation wrapper); set RF_NO_ADMIN=1
+# to build a copy that doesn't, for testing the UI. Release builds leave it
+# unset. Where the app keeps its settings/logs/profiles/PATH backups is
+# decided in core/paths.py (next to the exe when portable, otherwise
+# %LOCALAPPDATA%\RuntimeForge).
+import os
 
 a = Analysis(
     ['runtime_forge.py'],

@@ -80,6 +80,13 @@
             },
             {
                 "colorScheme": "Python Burgundy",
+                "commandline": "C:\\Program Files\\Python314\\python.exe",
+                "guid": "{7c1e5d2a-93b4-4f60-8a17-2d9e4b6f0a14}",
+                "icon": "C:\\Program Files\\Python314\\python.exe",
+                "name": "\ud83d\udfe5 Python 3.14"
+            },
+            {
+                "colorScheme": "Python Burgundy",
                 "commandline": "C:\\Program Files\\Python313\\python.exe",
                 "guid": "{5d8aadd8-c4a2-4f99-a493-ecaec8042092}",
                 "icon": "C:\\Program Files\\Python313\\python.exe",

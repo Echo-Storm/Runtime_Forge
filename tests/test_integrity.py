@@ -17,6 +17,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+os.environ.pop("RUNTIME_FORGE_DATA_DIR", None)  # these tests exercise the real data-dir rules
+
 from core import downloader, paths, signature
 from core.downloader import Trust, download, file_sha256, reverify
 from core.logger import setup_logging

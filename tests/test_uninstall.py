@@ -25,9 +25,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core import checks, definitions, path_backup
 from core.definitions import InstallContext, build_components
 from core.logger import setup_logging
-from core.paths import get_app_dir
+from core.paths import get_data_dir
 
-app_dir = get_app_dir()
+app_dir = get_data_dir()
 setup_logging(app_dir)
 
 results: dict[str, object] = {}

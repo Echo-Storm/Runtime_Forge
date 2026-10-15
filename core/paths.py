@@ -60,6 +60,13 @@ def get_data_dir() -> Path:
     it are executed elevated. %LOCALAPPDATA% is writable by any unelevated
     process running as the same user.
     """
+    override = os.environ.get("RUNTIME_FORGE_DATA_DIR")
+    if override:
+        # For tests and debugging: keep logs/profiles/backups out of the real locations.
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
     app_dir = get_app_dir()
     if not getattr(sys, "frozen", False) or (app_dir / PORTABLE_MARKER).is_file():
         return app_dir
