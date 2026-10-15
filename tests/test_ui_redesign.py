@@ -143,8 +143,8 @@ window.log_view.clear()
 window._on_log_line("2026 - [FAIL] boom <b>x</b>")
 window._on_log_line("2026 - [ OK ] fine")
 html_out = window.log_view.toHtml()
-results["failure_lines_colored_red"] = mw.theme.ERR.lower() in html_out.lower()
-results["success_lines_colored_green"] = mw.theme.OK.lower() in html_out.lower()
+results["failure_lines_colored_red"] = mw.theme.palette.ERR.lower() in html_out.lower()
+results["success_lines_colored_green"] = mw.theme.palette.OK.lower() in html_out.lower()
 results["log_text_is_escaped"] = "<b>x</b>" in window.log_view.toPlainText()
 
 

@@ -17,8 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QSettings, QUrl
-from PyQt6.QtGui import QAction, QColor, QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtCore import QEvent, QObject, QMimeData, Qt, QSettings, QUrl
+from PyQt6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
@@ -33,11 +33,7 @@ from core.logger import setup_logging
 from core.paths import get_bundle_dir, get_data_dir
 from core.version_resolvers import LatestInfo, version_is_newer
 from ui import theme
-from ui.theme import (
-    COLOR_FAILED, COLOR_INSTALLED, COLOR_INSTALLING, COLOR_NOT_INSTALLED,
-    COLOR_PATH_WARNING, COLOR_SKIPPED, COLOR_UPDATE_AVAILABLE,
-)
-from ui.workers import InstallWorker, ResultStatus, ScanWorker, UninstallWorker
+from ui.workers import AppUpdateCheck, InstallWorker, ResultStatus, ScanWorker, UninstallWorker
 
 # Status-column text. Short on purpose: the version has its own columns, so a
 # status never needs to be wider than a glyph and two words.
@@ -112,6 +108,7 @@ class MainWindow(QMainWindow):
         self._install_total = 0
         self._install_done = 0
         self._install_results: dict[str, ResultStatus] = {}
+        self._update_check: Optional[AppUpdateCheck] = None
 
         settings_path = str(self.app_dir / "RuntimeForge.ini")
         self.settings = QSettings(settings_path, QSettings.Format.IniFormat)
@@ -121,6 +118,10 @@ class MainWindow(QMainWindow):
         # NOT inherit a stylesheet set only on MainWindow, so confirmation
         # dialogs (profile overwrite, PATH restore, etc.) would otherwise
         # render in plain unthemed Windows chrome against this dark UI.
+        self._theme_pref = self.settings.value("theme", "system")
+        if self._theme_pref not in ("system", "dark", "light"):
+            self._theme_pref = "system"
+        theme.set_scheme(self._resolve_scheme())
         QApplication.instance().setStyleSheet(build_app_stylesheet())
         self._setup_ui()
         self._load_settings()
@@ -131,6 +132,7 @@ class MainWindow(QMainWindow):
         self._refresh_path_backup_combo()
         self._update_selection_ui()
         self._start_scan()
+        self._start_update_check()
         self.tree.setFocus()
 
     # ------------------------------------------------------------------
@@ -178,9 +180,23 @@ class MainWindow(QMainWindow):
         kofi_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
         self.status_bar.addPermanentWidget(kofi_btn)
 
+        # Appears only when a newer release exists (see _start_update_check).
+        self.update_btn = QPushButton("")
+        self.update_btn.setObjectName("linkBtn")
+        self.update_btn.setFlat(True)
+        self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_btn.setVisible(False)
+        self.status_bar.addPermanentWidget(self.update_btn)
+
+        try:
+            QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_scheme_changed)
+        except AttributeError:
+            pass  # Qt older than 6.5: no live scheme notifications
+
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self.search_box.setFocus)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self._on_rescan_shortcut)
 
+        self.setAcceptDrops(True)
         self.resize(1180, 780)
 
     def _build_banner(self) -> QFrame:
@@ -293,6 +309,22 @@ class MainWindow(QMainWindow):
         expand = menu.addAction("Expand all")
         collapse = menu.addAction("Collapse all")
         menu.addSeparator()
+        theme_menu = menu.addMenu("Theme")
+        self.theme_group = QActionGroup(self)
+        self.theme_group.setExclusive(True)
+        self.theme_actions: dict[str, QAction] = {}
+        for pref, label in (("system", "Follow Windows"), ("dark", "Dark"), ("light", "Light")):
+            action = theme_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(pref == self._theme_pref)
+            action.triggered.connect(lambda _checked=False, p=pref: self._set_theme_pref(p))
+            self.theme_group.addAction(action)
+            self.theme_actions[pref] = action
+        self.check_updates_action = menu.addAction("Check for app updates")
+        self.check_updates_action.setCheckable(True)
+        self.check_updates_action.setChecked(self.settings.value("check_app_updates", True, type=bool))
+        self.check_updates_action.toggled.connect(self._on_check_updates_toggled)
+        menu.addSeparator()
         open_logs = menu.addAction("Open log folder")
         menu.addSeparator()
         donate = menu.addAction("♥  Support on Ko-fi")
@@ -302,6 +334,10 @@ class MainWindow(QMainWindow):
         open_logs.triggered.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.app_dir))))
         donate.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
         self.menu_btn.setMenu(menu)
+        self.menu_btn.setAccessibleName("More options")
+        self.profile_menu_btn.setAccessibleName("Manage profiles")
+        self.profile_combo.setAccessibleName("Profile")
+        self.search_box.setAccessibleName("Search components")
         row.addWidget(self.menu_btn)
         return bar
 
@@ -334,7 +370,7 @@ class MainWindow(QMainWindow):
         # Shown over the tree when a search/filter leaves nothing to display.
         self.empty_label = QLabel("No components match your search or filter.", tree.viewport())
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(f"color: {theme.TEXT_DIM}; background: transparent;")
+        self.empty_label.setObjectName("emptyLabel")
         self.empty_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.empty_label.hide()
         self._viewport_filter = _ResizeFilter(lambda: self.empty_label.setGeometry(tree.viewport().rect()), tree)
@@ -352,7 +388,7 @@ class MainWindow(QMainWindow):
         self.details_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.details_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.details_label.setMargin(10)
-        self.details_label.setStyleSheet(f"background-color: {theme.SURFACE};")
+        self.details_label.setObjectName("detailsLabel")
         details_scroll = QScrollArea()
         details_scroll.setWidgetResizable(True)
         details_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -365,7 +401,30 @@ class MainWindow(QMainWindow):
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("Install and scan output appears here.")
-        self.log_tab_index = tabs.addTab(self.log_view, "Log")
+
+        log_page = QWidget()
+        log_page.setObjectName("tabPage")
+        log_layout = QVBoxLayout(log_page)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(0)
+        log_bar = QHBoxLayout()
+        log_bar.setContentsMargins(8, 6, 8, 6)
+        log_bar.setSpacing(6)
+        log_bar.addStretch()
+        self.log_copy_btn = QPushButton("Copy")
+        self.log_clear_btn = QPushButton("Clear")
+        self.log_open_btn = QPushButton("Open log file")
+        for btn in (self.log_copy_btn, self.log_clear_btn, self.log_open_btn):
+            btn.setObjectName("miniBtn")
+            log_bar.addWidget(btn)
+        self.log_copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.log_view.toPlainText()))
+        self.log_clear_btn.clicked.connect(self.log_view.clear)
+        self.log_open_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.logger.log_file)))
+        )
+        log_layout.addLayout(log_bar)
+        log_layout.addWidget(self.log_view, stretch=1)
+        self.log_tab_index = tabs.addTab(log_page, "Log")
 
         # --- PATH backups ---
         page = QWidget()
@@ -493,6 +552,80 @@ class MainWindow(QMainWindow):
             )
 
     # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def _resolve_scheme(self) -> str:
+        """The palette to use: an explicit Dark/Light choice, or whatever
+        Windows is set to (dark if it can't be determined)."""
+        if self._theme_pref in ("dark", "light"):
+            return self._theme_pref
+        try:
+            scheme = QGuiApplication.styleHints().colorScheme()
+        except AttributeError:
+            return "dark"
+        return "light" if scheme == Qt.ColorScheme.Light else "dark"
+
+    def _apply_theme(self):
+        theme.set_scheme(self._resolve_scheme())
+        QApplication.instance().setStyleSheet(build_app_stylesheet())
+        self._restyle_items()
+        self._show_details(self.tree.currentItem())
+
+    def _restyle_items(self):
+        """Recolors the per-item foregrounds (QSS can't reach those) after a theme switch."""
+        p = theme.palette
+        for item in self.tree_items.values():
+            kind = item.data(COL_STATUS, Qt.ItemDataRole.UserRole) or "missing"
+            item.setForeground(COL_STATUS, self._color(theme.status_color(kind)))
+            item.setForeground(COL_INSTALLED, self._color(p.TEXT_DIM))
+            latest_kind = item.data(COL_LATEST, Qt.ItemDataRole.UserRole) or "skip"
+            item.setForeground(COL_LATEST, self._color(theme.status_color(latest_kind)))
+        for cat_item in self.category_items.values():
+            kind = cat_item.data(COL_STATUS, Qt.ItemDataRole.UserRole) or "skip"
+            cat_item.setForeground(COL_STATUS, self._color(theme.status_color(kind)))
+
+    # ------------------------------------------------------------------
+    # App update notice
+    # ------------------------------------------------------------------
+
+    def _start_update_check(self):
+        """Only the packaged app looks (a source checkout is its own updater),
+        and only if the user hasn't switched it off in the menu."""
+        packaged = getattr(sys, "frozen", False) or os.environ.get("RF_FORCE_UPDATE_CHECK") == "1"
+        if not packaged or not self.check_updates_action.isChecked():
+            return
+        self._update_check = AppUpdateCheck(self.APP_VERSION, self)
+        self._update_check.update_found.connect(self._on_app_update_found)
+        self._update_check.start()
+
+    def _on_app_update_found(self, version: str, url: str):
+        self.update_btn.setText(f"⬆  v{version} available")
+        self.update_btn.setToolTip("A newer Runtime Forge is out — open the release page")
+        try:
+            self.update_btn.clicked.disconnect()
+        except TypeError:
+            pass
+        self.update_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url or "https://github.com/Echo-Storm/Runtime_Forge/releases")))
+        self.update_btn.setVisible(True)
+
+    def _on_check_updates_toggled(self, on: bool):
+        self.settings.setValue("check_app_updates", on)
+        if on:
+            self._start_update_check()
+        else:
+            self.update_btn.setVisible(False)
+
+    def _set_theme_pref(self, pref: str):
+        self._theme_pref = pref
+        self.settings.setValue("theme", pref)
+        self._apply_theme()
+
+    def _on_system_scheme_changed(self, *_args):
+        if self._theme_pref == "system":
+            self._apply_theme()
+
+    # ------------------------------------------------------------------
     # Tree population / row presentation
     # ------------------------------------------------------------------
 
@@ -500,9 +633,12 @@ class MainWindow(QMainWindow):
     def _color(hex_str: str) -> QColor:
         return QColor(hex_str)
 
-    def _set_status(self, item: QTreeWidgetItem, text: str, color: str):
+    def _set_status(self, item: QTreeWidgetItem, text: str, kind: str):
+        """`kind` (ok / update / missing / busy / fail / skip / warn / checking) is
+        remembered on the item so a theme switch can recolor it."""
         item.setText(COL_STATUS, text)
-        item.setForeground(COL_STATUS, self._color(color))
+        item.setData(COL_STATUS, Qt.ItemDataRole.UserRole, kind)
+        item.setForeground(COL_STATUS, self._color(theme.status_color(kind)))
 
     def _populate_tree(self):
         for component in self.components:
@@ -514,7 +650,8 @@ class MainWindow(QMainWindow):
                 font = cat_item.font(COL_NAME)
                 font.setBold(True)
                 cat_item.setFont(COL_NAME, font)
-                cat_item.setForeground(COL_STATUS, self._color(theme.TEXT_DIM))
+                cat_item.setData(COL_STATUS, Qt.ItemDataRole.UserRole, "skip")
+                cat_item.setForeground(COL_STATUS, self._color(theme.status_color("skip")))
                 self.category_items[component.category] = cat_item
 
             leaf = QTreeWidgetItem(cat_item, [component.name, STATUS_CHECKING, "", ""])
@@ -522,9 +659,9 @@ class MainWindow(QMainWindow):
             leaf.setCheckState(COL_NAME, Qt.CheckState.Unchecked)
             leaf.setData(COL_NAME, Qt.ItemDataRole.UserRole, component.key)
             leaf.setToolTip(COL_NAME, f"{component.name}\n{component.category}")
-            leaf.setForeground(COL_STATUS, self._color(COLOR_NOT_INSTALLED))
-            leaf.setForeground(COL_INSTALLED, self._color(theme.TEXT_DIM))
-            leaf.setForeground(COL_LATEST, self._color(theme.TEXT_DIM))
+            self._set_status(leaf, STATUS_CHECKING, "checking")
+            leaf.setForeground(COL_INSTALLED, self._color(theme.palette.TEXT_DIM))
+            leaf.setForeground(COL_LATEST, self._color(theme.palette.TEXT_DIM))
             self.tree_items[component.key] = leaf
 
         self.tree.expandAll()
@@ -543,7 +680,9 @@ class MainWindow(QMainWindow):
             if updates:
                 text += f"  ·  {updates} update{'s' if updates != 1 else ''}"
             cat_item.setText(COL_STATUS, text)
-            cat_item.setForeground(COL_STATUS, self._color(COLOR_UPDATE_AVAILABLE if updates else theme.TEXT_DIM))
+            kind = "update" if updates else "skip"
+            cat_item.setData(COL_STATUS, Qt.ItemDataRole.UserRole, kind)
+            cat_item.setForeground(COL_STATUS, self._color(theme.status_color(kind)))
 
     # ------------------------------------------------------------------
     # Settings
@@ -566,6 +705,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._save_settings()
+        if self._update_check is not None and self._update_check.isRunning():
+            self._update_check.wait(3000)
         if self.install_worker and self.install_worker.isRunning():
             reply = QMessageBox.question(
                 self, "Install in Progress", "An install is running. Quit anyway?",
@@ -672,7 +813,7 @@ class MainWindow(QMainWindow):
         self.summary_label.setText("Scanning installed components…")
         self._scan_results.clear()
         for key, item in self.tree_items.items():
-            self._set_status(item, STATUS_CHECKING, COLOR_NOT_INSTALLED)
+            self._set_status(item, STATUS_CHECKING, "checking")
         self._update_category_summaries()
 
         self.scan_worker = ScanWorker(self.components, self)
@@ -695,17 +836,18 @@ class MainWindow(QMainWindow):
 
         if state.installed:
             if has_update:
-                self._set_status(item, STATUS_UPDATE, COLOR_UPDATE_AVAILABLE)
+                self._set_status(item, STATUS_UPDATE, "update")
             elif latest is not None:
-                self._set_status(item, STATUS_UP_TO_DATE, COLOR_INSTALLED)
+                self._set_status(item, STATUS_UP_TO_DATE, "ok")
             else:
-                self._set_status(item, STATUS_INSTALLED, COLOR_INSTALLED)
+                self._set_status(item, STATUS_INSTALLED, "ok")
         else:
-            self._set_status(item, STATUS_NOT_INSTALLED, COLOR_NOT_INSTALLED)
+            self._set_status(item, STATUS_NOT_INSTALLED, "missing")
 
         item.setText(COL_INSTALLED, state.version or "–")
         item.setText(COL_LATEST, latest.version if latest is not None else "–")
-        item.setForeground(COL_LATEST, self._color(COLOR_UPDATE_AVAILABLE if has_update else theme.TEXT_DIM))
+        item.setData(COL_LATEST, Qt.ItemDataRole.UserRole, "update" if has_update else "skip")
+        item.setForeground(COL_LATEST, self._color(theme.status_color("update" if has_update else "skip")))
         item.setToolTip(COL_STATUS, (
             f"Installed {state.version}, latest {latest.version}" if has_update and state.version else item.text(COL_STATUS)
         ))
@@ -909,14 +1051,14 @@ class MainWindow(QMainWindow):
         self._scan_results[key] = (state, previous_latest)
 
         if state.installed:
-            self._set_status(item, STATUS_INSTALLED, COLOR_INSTALLED)
+            self._set_status(item, STATUS_INSTALLED, "ok")
             QMessageBox.information(
                 self, "Still Installed",
                 f"{component.name}'s uninstall command completed, but it still appears installed — "
                 f"it may need a restart to finish, or the removal wasn't fully complete.",
             )
         else:
-            self._set_status(item, STATUS_NOT_INSTALLED, COLOR_NOT_INSTALLED)
+            self._set_status(item, STATUS_NOT_INSTALLED, "missing")
             item.setText(COL_INSTALLED, "–")
             item.setCheckState(COL_NAME, Qt.CheckState.Unchecked)
             self.status_bar.showMessage(f"{component.name} uninstalled", 5000)
@@ -1172,7 +1314,22 @@ class MainWindow(QMainWindow):
         src, _ = QFileDialog.getOpenFileName(self, "Import Profile", "", "JSON Files (*.json)")
         if not src:
             return
-        profile = profiles.load_profile(Path(src))
+        self._import_profile_file(Path(src))
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.toLocalFile().lower().endswith(".json") for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Drop a profile .json anywhere on the window to import it."""
+        for url in event.mimeData().urls():
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() == ".json":
+                self._import_profile_file(path)
+                break
+
+    def _import_profile_file(self, src: Path):
+        profile = profiles.load_profile(src)
         if not profile:
             QMessageBox.warning(self, "Import Failed", "That file isn't a valid profile.")
             return
@@ -1372,7 +1529,7 @@ class MainWindow(QMainWindow):
     def _on_component_started(self, key: str):
         item = self.tree_items.get(key)
         if item:
-            self._set_status(item, STATUS_INSTALLING, COLOR_INSTALLING)
+            self._set_status(item, STATUS_INSTALLING, "busy")
             self.tree.scrollToItem(item)
         component = self.component_by_key.get(key)
         if component:
@@ -1394,15 +1551,15 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         if status == ResultStatus.INSTALLED and warning:
-            self._set_status(item, "⚠   Installed — not on PATH", COLOR_PATH_WARNING)
+            self._set_status(item, "⚠   Installed — not on PATH", "warn")
             item.setToolTip(COL_STATUS, warning)
         elif status == ResultStatus.INSTALLED:
-            self._set_status(item, STATUS_INSTALLED, COLOR_INSTALLED)
+            self._set_status(item, STATUS_INSTALLED, "ok")
         elif status == ResultStatus.SKIPPED:
-            self._set_status(item, STATUS_SKIPPED, COLOR_SKIPPED)
+            self._set_status(item, STATUS_SKIPPED, "skip")
             item.setToolTip(COL_STATUS, warning or "Already installed and current")
         else:
-            self._set_status(item, STATUS_FAILED, COLOR_FAILED)
+            self._set_status(item, STATUS_FAILED, "fail")
             item.setToolTip(COL_STATUS, "See the log for details")
 
         # Keep _scan_results (what the context menu and Export Report read)
@@ -1426,7 +1583,7 @@ class MainWindow(QMainWindow):
         """Fills the Details tab for the highlighted row."""
         key = item.data(COL_NAME, Qt.ItemDataRole.UserRole) if item is not None else None
         component = self.component_by_key.get(key) if key else None
-        dim, text = theme.TEXT_DIM, theme.TEXT
+        dim, text = theme.palette.TEXT_DIM, theme.palette.TEXT
         if component is None:
             if item is not None and item.parent() is None:
                 body = f'<span style="color:{dim}">{html.escape(item.text(COL_NAME))} — {html.escape(item.text(COL_STATUS)) or "scanning…"}</span>'
@@ -1448,7 +1605,7 @@ class MainWindow(QMainWindow):
             label = "Latest"
             value = latest.version
             if self._has_update(state, latest) if state else False:
-                value += f'  <span style="color:{theme.WARN}">(update available)</span>'
+                value += f'  <span style="color:{theme.palette.WARN}">(update available)</span>'
             rows.append((label, value))
             if latest.url:
                 rows.append(("Downloads from", html.escape(latest.url)))
@@ -1473,13 +1630,16 @@ class MainWindow(QMainWindow):
             f'<table cellspacing="4" style="margin-top:6px">{table}</table>'
         )
 
-    _LOG_COLORS = (
-        ("[FAIL]", theme.ERR), ("WARNING", theme.WARN), ("[ OK ]", theme.OK),
-        ("[SKIP]", theme.TEXT_FAINT), ("[ DRY]", theme.ACCENT),
-    )
+    @staticmethod
+    def _log_colors():
+        p = theme.palette
+        return (
+            ("[FAIL]", p.ERR), ("WARNING", p.WARN), ("[ OK ]", p.OK),
+            ("[SKIP]", p.TEXT_FAINT), ("[ DRY]", p.ACCENT),
+        )
 
     def _on_log_line(self, line: str):
-        color = next((c for tag, c in self._LOG_COLORS if tag in line), None)
+        color = next((c for tag, c in self._log_colors() if tag in line), None)
         escaped = html.escape(line)
         self.log_view.append(f'<span style="color:{color}">{escaped}</span>' if color else escaped)
 

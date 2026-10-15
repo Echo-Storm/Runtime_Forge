@@ -25,7 +25,7 @@ from core import checks, http_cache, path_backup
 from core.definitions import Component, InstallContext, InstalledState
 from core.logger import get_logger
 from core.paths import get_app_dir, get_data_dir
-from core.version_resolvers import version_is_newer
+from core.version_resolvers import github_headers, version_is_newer
 
 MAX_SCAN_WORKERS = 8
 
@@ -309,3 +309,27 @@ class UninstallWorker(QThread):
             self.finished_uninstall.emit(self.component.key, ok)
         finally:
             log.remove_listener(listener)
+
+
+RELEASES_API = "https://api.github.com/repos/Echo-Storm/Runtime_Forge/releases/latest"
+
+
+class AppUpdateCheck(QThread):
+    """One quiet GET to GitHub's releases API: is there a newer Runtime Forge?
+    Emits only when there is; any failure (offline, rate limited) is silent."""
+    update_found = pyqtSignal(str, str)  # version, release page URL
+
+    def __init__(self, current_version: str, parent=None):
+        super().__init__(parent)
+        self.current_version = current_version
+
+    def run(self):
+        try:
+            resp = http_cache.get(RELEASES_API, headers=github_headers(), timeout=10)
+            resp.raise_for_status()
+            release = resp.json()
+            version = str(release.get("tag_name", "")).lstrip("v")
+            if version and version_is_newer(version, self.current_version):
+                self.update_found.emit(version, release.get("html_url") or "")
+        except Exception:
+            pass
