@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3
 - **".NET 10 / OpenAL always say update available" fixed.**
   - .NET runtimes, SDKs and JDKs install *beside* older versions (10.0.11 and 10.0.13 both stay),
     and detection used the first folder the filesystem listed, not the newest — so an

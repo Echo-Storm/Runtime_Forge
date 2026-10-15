@@ -1,14 +1,14 @@
 # Runtime Forge — handoff notes
 
-For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for v0.4.2.
+For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for v0.4.3.
 
 ## Where things stand
 
 - **App:** PyQt6 desktop GUI that scans, installs, updates and uninstalls 72 Windows
   runtimes / dev tools / apps. Dark + light theme (follows Windows). See `README.md`.
 - **Repo:** <https://github.com/Echo-Storm/Runtime_Forge>, branch `main`, public.
-- **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.4.2 (v0.1.0 was deleted — its installer had been
-  built from a stale `dist/`). Latest is v0.4.2.
+- **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.4.2, v0.4.3 (v0.1.0 was deleted — its installer had been
+  built from a stale `dist/`). Latest is v0.4.3.
 - **Tests:** 26 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
 - **First real run (v0.4.0, elevated, on the author's machine — see the log summary below):**
   13 installs succeeded, 3 were falsely reported failed (DirectPlay, VC++ 2015-2022 x86/x64 —
@@ -166,7 +166,7 @@ custom-folder install in place), PowerShell 7, Git, CMake, gh, LLVM, and the Ter
 
 ## What's next (suggested order)
 
-1. Whatever the test pass above turns up.
+1. Whatever the test pass above turns up (incl. running both default actions: Python and Java).
 2. ~~A pinned `versions.json` fetched from the repo~~ — **done** (`core/published.py`, `tools/update_versions.py`,
    `.github/workflows/update-versions.yml`). Check that the workflow actually ran after the first push
    (Actions tab → *Update versions.json* → Run workflow) and that `data/versions.json` updates daily.
