@@ -137,7 +137,7 @@ Using the app
 - **Updates:** the packaged app makes one quiet request to GitHub at launch
   and shows "v0.x available" in the status bar when a newer release exists
   (☰ → "Check for app updates" turns it off).
-- **Make the newest Python the default:** ☰ menu — see *Python* below.
+- **Make the newest Python / Java the default:** ☰ menu — see *Python* and *Java* below.
 - Shortcuts: Ctrl+F search, Ctrl+R rescan.
 
 Quick start
@@ -278,7 +278,12 @@ above (it has a `latest-sdk` field per channel alongside `latest-runtime`).
 
 **Java (Temurin JDK)** — 21, 17, and 8, resolved to the latest release from
 Adoptium's `temurin<N>-binaries` GitHub releases (falling back to the
-Adoptium API), with the release's SHA-256 verified before running it.
+Adoptium API), with the release's SHA-256 verified before running it. As with
+Python, only the newest JDK takes over PATH (`java`); older ones install side by
+side without touching it. **☰ → "Make the newest Java the default…"** repairs a
+machine where an older JDK (or a JRE) has taken over: it puts the newest JDK first
+on PATH, takes the other Temurin `bin` folders off it, and — only if `JAVA_HOME` is
+already set to a Temurin folder — points `JAVA_HOME` at the newest JDK.
 
 **Python** — 3.10, 3.11, 3.12, 3.13, 3.14 (pinned patch versions, all-users
 install with the launcher). python.org only publishes Windows installers for a

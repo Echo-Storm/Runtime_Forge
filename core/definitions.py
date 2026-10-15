@@ -28,7 +28,7 @@ from core.installer_runner import run_exe, run_msi
 from core.logger import get_logger
 from core.paths import get_bundle_dir
 from core.signature import check_signature, verify_signature
-from core.version_resolvers import LatestInfo, asset_sha256, github_headers, get_latest_github_asset, get_latest_temurin, get_latest_node_lts
+from core.version_resolvers import LatestInfo, version_is_newer, asset_sha256, github_headers, get_latest_github_asset, get_latest_temurin, get_latest_node_lts
 
 PROGRAM_FILES = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
 SYSTEM_ROOT = Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -53,6 +53,7 @@ class InstallContext:
     temp_dir: Path
     dry_run: bool = False
     progress_cb: ProgressCB = None
+    force: bool = False      # "Reinstall": redo it even if it looks current
 
 
 @dataclass
@@ -617,7 +618,12 @@ def _openal_install(ctx: InstallContext) -> bool:
     if not _openal_has_legacy_key():
         if not _openal_install_legacy_step(ctx):
             return False
-    if not _openal_dll_is_soft():
+    installed = _openal_dll_is_soft()
+    # Not there at all, an UPDATE (an older Soft build is in place - without this
+    # check the update was reported "installed" without ever being applied, so it
+    # showed as outdated forever), or an explicit Reinstall.
+    needs_soft = not installed or ctx.force or version_is_newer(_openal_resolve_latest().version, installed)
+    if needs_soft:
         if not _openal_install_soft_step(ctx):
             return False
     return True
@@ -945,13 +951,21 @@ def _jdk_uninstall_pattern(jd: _JdkDef) -> "re.Pattern[str]":
     return re.compile(rf"Eclipse Temurin JDK with Hotspot {jd.feature_version}\.")
 
 
+_NEWEST_JDK = max(_JDK_DEFS, key=lambda j: j.feature_version)
+# Temurin's MSI features: FeatureEnvironment (adds the JDK to PATH) is on at the
+# default INSTALLLEVEL=1. Only the newest JDK should take over `java`; the others
+# install side by side without touching PATH (point tools at them with JAVA_HOME).
+_JDK_ARGS_DEFAULT = ["/quiet", "/norestart", "INSTALLLEVEL=1"]
+_JDK_ARGS_OFF_PATH = ["/quiet", "/norestart", "ADDLOCAL=FeatureMain,FeatureJarFileRunWith"]
+
+
 def _jdk_install(jd: _JdkDef, ctx: InstallContext) -> bool:
     latest = _jdk_resolve_latest(jd)
     file = download(latest.url, ctx.temp_dir, latest.filename, jd.name, ctx.dry_run, ctx.progress_cb,
                     trust=Trust(publishers=("Eclipse",), sha256=latest.sha256))
     if not file:
         return False
-    return run_msi(file, ["/quiet", "/norestart", "INSTALLLEVEL=1"], jd.name, ctx.dry_run)
+    return run_msi(file, _JDK_ARGS_DEFAULT if jd is _NEWEST_JDK else _JDK_ARGS_OFF_PATH, jd.name, ctx.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -1421,8 +1435,13 @@ def _llvm_install(ctx: InstallContext) -> bool:
                     trust=Trust(sha256=latest.sha256))
     if not file:
         return False
-    # LLVM's installer is NSIS-based; /S is the standard NSIS silent flag.
-    return run_exe(file, ["/S"], f"LLVM {latest.version}", ctx.dry_run)
+    # LLVM's installer is NSIS-based; /S is the standard NSIS silent flag. Silent mode
+    # skips its "add LLVM to PATH" page, so this app adds the folder itself (idempotent).
+    if not run_exe(file, ["/S"], f"LLVM {latest.version}", ctx.dry_run):
+        return False
+    if not ctx.dry_run and not path_backup.add_directory_to_path(_LLVM_EXE.parent):
+        get_logger().status(f"WARNING: could not add {_LLVM_EXE.parent} to PATH - you may need to add it manually")
+    return True
 
 
 # ---------------------------------------------------------------------------

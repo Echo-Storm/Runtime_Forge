@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+- **".NET 10 / OpenAL always say update available" fixed.**
+  - .NET runtimes, SDKs and JDKs install *beside* older versions (10.0.11 and 10.0.13 both stay),
+    and detection used the first folder the filesystem listed, not the newest — so an
+    already-updated component read as outdated forever. It now takes the highest version.
+  - OpenAL's installer skipped the download whenever a Soft build was already present, so an
+    *update* was reported "installed" without being applied. It now replaces an older build
+    (and Reinstall always does).
+- **LLVM** is now added to PATH by the app (its silent installer skips that step).
+- **Only the newest JDK takes over PATH** (older ones install without the PATH feature), and
+  **☰ → "Make the newest Java the default…"** repairs a machine where `java` already means
+  JDK 8: newest JDK first, other Temurin folders off PATH, `JAVA_HOME` repointed if it was set
+  to a Temurin folder (a JRE there breaks Gradle/Maven/IDEs).
+
 ## 0.4.2
 - **Only the newest Python is the default.** Installing Python no longer puts every
   version on PATH (the last one installed used to win): only the newest series gets

@@ -85,6 +85,10 @@ def dir_exists(path: str) -> bool:
     return Path(path).is_dir()
 
 
+def _numeric_key(name: str) -> tuple:
+    return tuple(int(n) for n in re.findall(r"\d+", name))
+
+
 def any_child_dir_matches(base_dir: str, name_prefix: str) -> Optional[Path]:
     """Mirrors `Get-ChildItem <base> -Directory | Where Name -like "<prefix>*"`
     — used for the Adoptium JDK install folders, which embed the exact patch
@@ -92,10 +96,14 @@ def any_child_dir_matches(base_dir: str, name_prefix: str) -> Optional[Path]:
     base = Path(base_dir)
     if not base.is_dir():
         return None
-    for child in base.iterdir():
-        if child.is_dir() and child.name.startswith(name_prefix):
-            return child
-    return None
+    matches = [c for c in base.iterdir() if c.is_dir() and c.name.startswith(name_prefix)]
+    if not matches:
+        return None
+    # .NET runtimes/SDKs and JDKs install NEW versions beside the old ones
+    # (10.0.11 and 10.0.13 both stay), so "the" install is the highest version -
+    # not whichever folder the filesystem happens to list first. (Taking the
+    # first made an already-updated component read as outdated forever.)
+    return max(matches, key=lambda c: (_numeric_key(c.name), c.name))
 
 
 def refresh_path_env() -> None:

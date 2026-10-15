@@ -9,7 +9,7 @@ For whoever (human or Claude) picks this up next. Written at v0.4.0, updated for
 - **Repo:** <https://github.com/Echo-Storm/Runtime_Forge>, branch `main`, public.
 - **Releases:** v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.4.2 (v0.1.0 was deleted — its installer had been
   built from a stale `dist/`). Latest is v0.4.2.
-- **Tests:** 25 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
+- **Tests:** 26 standalone scripts, `venv\Scripts\python.exe tools\run_tests.py` → all pass.
 - **First real run (v0.4.0, elevated, on the author's machine — see the log summary below):**
   13 installs succeeded, 3 were falsely reported failed (DirectPlay, VC++ 2015-2022 x86/x64 —
   detection bugs, fixed in 0.4.1). The log lives in `%LOCALAPPDATA%\RuntimeForge\RuntimeForge_Log_*.txt`.
@@ -32,6 +32,7 @@ core/
                         components' latest version/url/sha256; validated; skipped with a token
   terminal_profile.py   JSONC parser + merge/is_applied for the Windows Terminal profile
   python_default.py     PEP 514 discovery + the 'make the newest Python the default' PATH plan
+  java_default.py       the same for Temurin JDKs (+ JAVA_HOME repoint)
   http_cache.py         lookups cache: in-memory single-flight + on-disk ETag copies that survive
                         GitHub's rate limit (`http_cache.json` in the data folder)
   checks.py             registry/PE/command probes; one-read registry snapshot; appx_package_version()
@@ -148,6 +149,20 @@ Found and fixed in 0.4.1:
 because machine entries are resolved before user entries (a per-user newest Python — like the author's
 `E:\Python314` — could never win from the user PATH). Windows Terminal's bundled profile still uses
 `C:\Program Files\Python3xx` paths, so a custom-folder Python has a dead profile entry (backlog).
+
+## The v0.4.2 install log (elevated, "update everything")
+
+12 installed, 0 failed — OpenAL, .NET 10 runtimes + SDK, JDK 8, Python 3.14 (upgraded the existing
+custom-folder install in place), PowerShell 7, Git, CMake, gh, LLVM, and the Terminal profile merge
+(backup written, "your own profiles and settings were kept"). What it exposed, all fixed after 0.4.2:
+- ".NET 10 / OpenAL always say update available": side-by-side folders (first-match detection) and an
+  OpenAL install that skipped itself when Soft was already present.
+- LLVM's silent installer doesn't add itself to PATH (the app warned correctly); now it adds it.
+- Updating JDK 8 put it first on PATH again (`java -version` → 1.8): every Temurin MSI has
+  `FeatureEnvironment` on at INSTALLLEVEL=1. Older JDKs now install with
+  `ADDLOCAL=FeatureMain,FeatureJarFileRunWith`; the Java default action repairs existing machines.
+- The Python 3.14 upgrade did not re-add itself to PATH (the python.org installer doesn't on upgrade);
+  that's what the Python default action is for.
 
 ## What's next (suggested order)
 

@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from core import http_cache, path_backup, profiles, python_default
+from core import http_cache, java_default, path_backup, profiles, python_default
 from core.definitions import Component, InstalledState, build_components
 from core.logger import setup_logging
 from core.paths import get_bundle_dir, get_data_dir
@@ -313,6 +313,9 @@ class MainWindow(QMainWindow):
         self.python_default_action = menu.addAction("Make the newest Python the default…")
         self.python_default_action.setToolTip("Put the newest python.org Python first on PATH and take the older ones off it")
         self.python_default_action.triggered.connect(self._on_make_python_default)
+        self.java_default_action = menu.addAction("Make the newest Java the default…")
+        self.java_default_action.setToolTip("Put the newest Temurin JDK first on PATH, take the other Javas off it, and repoint JAVA_HOME")
+        self.java_default_action.triggered.connect(self._on_make_java_default)
         menu.addSeparator()
         theme_menu = menu.addMenu("Theme")
         self.theme_group = QActionGroup(self)
@@ -1529,6 +1532,65 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "Python Default Updated",
                 f"Python {latest.version} is now first on PATH. Open a new terminal and run `python --version` to confirm.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Could Not Change PATH",
+                "Windows refused the change - editing the machine PATH needs the app to run as administrator.",
+            )
+
+    def _on_make_java_default(self):
+        """Same idea as the Python default, for Temurin JDKs: `java` means whichever
+        install's bin folder is first on PATH, and every JDK installs itself there."""
+        if self._is_busy():
+            QMessageBox.information(self, "Busy", "Wait for the current install/uninstall/scan to finish first.")
+            return
+        javas = java_default.installed_javas()
+        machine, user = path_backup.read_current_path()
+        plan = java_default.plan_make_default(
+            machine, user, javas,
+            path_backup.read_env_var("machine", "JAVA_HOME"), path_backup.read_env_var("user", "JAVA_HOME"),
+        )
+        if plan is None:
+            QMessageBox.information(self, "No JDK Found", "No Temurin JDK is installed. Tick one under Java and install it first.")
+            return
+        latest = plan.latest
+        others = ", ".join(j.name for j in javas if j.home != latest.home) or "none"
+        if not plan.changed:
+            QMessageBox.information(
+                self, "Already the Default",
+                f"{latest.name} is already the only Java on PATH.\nOther installs (kept): {others}.",
+            )
+            return
+
+        details = [f"Remove from PATH ({scope}):  {entry}" for scope, entry in plan.removed]
+        details += [f"Put first on PATH ({scope}):  {entry}" for scope, entry in plan.added]
+        if plan.java_home_machine:
+            details.append(f"Set JAVA_HOME (machine):  {plan.java_home_machine}")
+        if plan.java_home_user:
+            details.append(f"Set JAVA_HOME (user):  {plan.java_home_user}")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Make Java the Default")
+        box.setText(f"Make {latest.name} the default Java?")
+        box.setInformativeText(
+            f"{latest.home}\n\n`java` will mean this one. The other installs ({others}) stay installed — "
+            f"point a tool at one with JAVA_HOME or its full path. PATH is backed up first (undo from the PATH "
+            f"backups tab). Terminals that are already open need restarting."
+        )
+        box.setDetailedText("\n".join(details) or "(no entries to change)")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        path_backup.create_backup(self.app_dir, f"before making {latest.name} the default Java")
+        ok = java_default.apply_plan(plan)
+        self._refresh_path_backup_combo()
+        if ok:
+            self.status_bar.showMessage(f"{latest.name} is now the default Java", 8000)
+            QMessageBox.information(
+                self, "Java Default Updated",
+                f"{latest.name} is now first on PATH. Open a new terminal and run `java -version` to confirm.",
             )
         else:
             QMessageBox.warning(

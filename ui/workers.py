@@ -213,7 +213,7 @@ class InstallWorker(QThread):
             def progress_cb(msg, frac, key=component.key):
                 self.component_progress.emit(key, msg, frac)
 
-            ctx = InstallContext(temp_dir=temp_dir, dry_run=self.dry_run, progress_cb=progress_cb)
+            ctx = InstallContext(temp_dir=temp_dir, dry_run=self.dry_run, progress_cb=progress_cb, force=self.force)
 
             try:
                 ran_ok = component.install(ctx)

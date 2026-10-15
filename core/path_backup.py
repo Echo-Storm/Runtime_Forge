@@ -266,6 +266,31 @@ def write_paths(machine: Optional[str], user: Optional[str]) -> bool:
     return ok
 
 
+def read_env_var(scope: str, name: str) -> Optional[str]:
+    """A machine- or user-level environment variable straight from the registry."""
+    hive, subkey = (winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY) if scope == "machine" else (winreg.HKEY_CURRENT_USER, _USER_ENV_KEY)
+    try:
+        with winreg.OpenKey(hive, subkey) as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except OSError:
+        return None
+
+
+def write_env_var(scope: str, name: str, value: str) -> bool:
+    """Sets a machine- or user-level environment variable and broadcasts the
+    change (machine scope needs elevation). Callers back PATH/env up first."""
+    hive, subkey = (winreg.HKEY_LOCAL_MACHINE, _MACHINE_ENV_KEY) if scope == "machine" else (winreg.HKEY_CURRENT_USER, _USER_ENV_KEY)
+    if not value.strip():
+        return False
+    try:
+        with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+    except OSError:
+        return False
+    _broadcast_environment_change()
+    return True
+
+
 def _broadcast_environment_change() -> None:
     HWND_BROADCAST = 0xFFFF
     WM_SETTINGCHANGE = 0x1A
